@@ -1,4 +1,4 @@
-// Shared HTTP bootstrap for every service (Issue 5, Day 5).
+// Shared HTTP bootstrap for every service (Issue 5, Day 5; shutdown added Issue 6, Day 6).
 //
 // Guarantees the common rules from docs/http-contract.md without repeating them:
 //   - GET /health with the documented shape on every service
@@ -6,10 +6,12 @@
 //   - 5 MB JSON body limit; malformed JSON -> 400 invalid_request
 //   - binds 127.0.0.1 only, one structured JSON startup line on stdout
 //   - exits 1 with the readable config error (no stack) when .env is invalid
+//   - graceful shutdown on SIGINT/SIGTERM and on logs\<service>.stop (Windows)
 
 "use strict";
 
 const express = require("express");
+const fs = require("fs");
 const path = require("path");
 
 const pkg = require(path.join(__dirname, "..", "..", "package.json"));
@@ -67,6 +69,11 @@ function start(serviceName, routes) {
   });
 
   const server = app.listen(service.port, config.host, () => {
+    const banner = `Welcome to the ${serviceName} service`;
+    console.log("");
+    console.log(`=== ${banner} ${"=".repeat(Math.max(0, 40 - banner.length))}`);
+    console.log(`    listening on http://${config.host}:${service.port}  (v${pkg.version})`);
+    console.log("===".padEnd(43, "="));
     console.log(
       JSON.stringify({
         event: "startup",
@@ -83,6 +90,31 @@ function start(serviceName, routes) {
     );
     process.exit(1);
   });
+
+  // Graceful shutdown (Issue 6): stop accepting connections, let in-flight
+  // requests finish, then exit 0. DB connections are per-request and already
+  // closed before a response is sent, so nothing else needs closing.
+  let stopping = false;
+  function shutdown(reason) {
+    if (stopping) return;
+    stopping = true;
+    console.log(JSON.stringify({ event: "shutdown", service: serviceName, reason }));
+    server.close(() => process.exit(0));
+    // Failsafe: never hang the stop sequence (e.g. a stuck keep-alive socket).
+    setTimeout(() => process.exit(0), 3000).unref();
+  }
+  process.on("SIGINT", () => shutdown("SIGINT"));
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+
+  // Windows-friendly stop channel: Stop-Process cannot deliver signals to a
+  // console process, so stop-etl.ps1 writes logs\<service>.stop instead and
+  // force-kills only if this process does not exit within its grace period.
+  const stopFile = path.join(config.logDir, `${serviceName}.stop`);
+  fs.rmSync(stopFile, { force: true }); // clear a stale file from a hard kill
+  const stopWatcher = setInterval(() => {
+    if (fs.existsSync(stopFile)) shutdown("stop-file");
+  }, 1000);
+  stopWatcher.unref();
 
   return { app, server, config };
 }
