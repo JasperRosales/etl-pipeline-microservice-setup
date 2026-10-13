@@ -292,21 +292,42 @@ Verified on 2026-10-13:
 
 ### Tasks
 
-- [ ] Handle `SIGTERM` / `SIGINT` in every service: stop accepting connections, close the database, exit 0.
-- [ ] Add `scripts/health-check.js` polling every `/health` endpoint with a timeout.
-- [ ] Make `start-etl.ps1` poll `/health` before printing "Startup commands completed."
-- [ ] Make `stop-etl.ps1` request a graceful stop first, wait, then force-kill only if still alive.
-- [ ] Verify a PID belongs to a `node` process before terminating it.
+- [x] Handle `SIGTERM` / `SIGINT` in every service: stop accepting connections, close the database, exit 0.
+- [x] Add `scripts/health-check.js` polling every `/health` endpoint with a timeout.
+- [x] Make `start-etl.ps1` poll `/health` before printing "Startup commands completed."
+- [x] Make `stop-etl.ps1` request a graceful stop first, wait, then force-kill only if still alive.
+- [x] Verify a PID belongs to a `node` process before terminating it.
 
 ### Acceptance criteria
 
-- [ ] `.\stop-etl.ps1` leaves no orphaned node processes and no corrupted `data\pos.db`.
-- [ ] `npm run health` exits 0 while the stack is up and 1 after it stops.
-- [ ] Restarting immediately after stopping works without manual cleanup.
+- [x] `.\stop-etl.ps1` leaves no orphaned node processes and no corrupted `data\pos.db`.
+- [x] `npm run health` exits 0 while the stack is up and 1 after it stops.
+- [x] Restarting immediately after stopping works without manual cleanup.
 
 ### Dependencies
 
 Issue 5.
+
+### Day 6 notes
+
+Verified on 2026-10-13:
+
+- Graceful stop on Windows uses a stop marker (`logs\<service>.stop`) because
+  `Stop-Process` cannot deliver SIGTERM to a console process; services also
+  handle SIGINT/SIGTERM where the OS can send them. All six services log
+  `{"event":"shutdown","reason":"stop-file"}` and exit 0.
+- `.\stop-etl.ps1` refuses to touch a PID that is not a node process, waits 5s
+  for a graceful exit, and only then force-kills (both paths verified live).
+- `start-etl.ps1` waits for `/health` on every started service (`--wait 15`)
+  before printing "Startup commands completed"; full start-to-healthy ≈ 3.5s.
+- **Two bugs found and fixed while testing:** (1) `npm run health` crashed with a
+  libuv assertion on exit because fetch keep-alive sockets were still closing —
+  probes now use `node:http` with `agent: false`; (2) the README's PID-file
+  parsing nests arrays on Windows PowerShell 5.1 (`ConvertFrom-Json` emits a
+  top-level JSON array as one object), which silently made the stop script a
+  no-op with 6 running services — both scripts now unwrap it explicitly.
+- `PRAGMA integrity_check` = ok after stops; immediate restart works with no
+  manual cleanup.
 
 ---
 
