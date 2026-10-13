@@ -5,7 +5,9 @@
 //
 // Exit 0 when every service answers /health with HTTP 200, exit 1 otherwise.
 // start-etl.ps1 uses --wait for its readiness check; `npm run health` runs a
-// single round.
+// single round. One line per service: OK/DOWN, name, endpoint, detail.
+//
+//   OK   extractor    127.0.0.1:3001  v0.1.0, up 42s
 
 "use strict";
 
@@ -27,6 +29,7 @@ const waitSeconds = waitArg >= 0 ? Number(process.argv[waitArg + 1]) : 0;
 
 function probe(service) {
   return new Promise((resolve) => {
+    const endpoint = `${config.host}:${service.port}`;
     const req = http.get(
       { host: config.host, port: service.port, path: "/health", agent: false, timeout: 2000 },
       (res) => {
@@ -41,10 +44,11 @@ function probe(service) {
             /* non-JSON body handled below via status */
           }
           if (res.statusCode === 200) {
-            resolve({ name: service.name, ok: true, detail: `v${body.version || "?"}, up ${body.uptime_s ?? "?"}s` });
+            resolve({ name: service.name, endpoint, ok: true, detail: `v${body.version || "?"}, up ${body.uptime_s ?? "?"}s` });
           } else {
             resolve({
               name: service.name,
+              endpoint,
               ok: false,
               detail: `HTTP ${res.statusCode}${body.error ? " " + body.error.code : ""}`,
             });
@@ -53,7 +57,7 @@ function probe(service) {
       }
     );
     req.on("timeout", () => req.destroy(new Error("timeout")));
-    req.on("error", (err) => resolve({ name: service.name, ok: false, detail: err.code || err.message }));
+    req.on("error", (err) => resolve({ name: service.name, endpoint, ok: false, detail: err.code || err.message }));
   });
 }
 
@@ -70,7 +74,7 @@ function round() {
   }
 
   for (const r of results) {
-    console.log(`${r.ok ? "OK  " : "DOWN"} ${r.name.padEnd(11)} ${r.detail}`);
+    console.log(`${r.ok ? "OK  " : "DOWN"} ${r.name.padEnd(11)} ${r.endpoint.padEnd(15)} ${r.detail}`);
   }
   const up = results.filter((r) => r.ok).length;
   console.log(`[health] ${up}/${results.length} services healthy`);

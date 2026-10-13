@@ -13,6 +13,21 @@ $Services = @(
 $LogDir = Join-Path $ProjectRoot "logs"
 $PidFile = Join-Path $LogDir "service-pids.json"
 
+# Resolve a service's port the same way services/shared/config.js does:
+# the .env value when present, otherwise the default. Keeps every console
+# line truthful even when ports are overridden.
+function Get-ServicePort([string]$Name) {
+    $Defaults = @{ extractor = 3001; transformer = 3002; loader = 3003; reporter = 3004; notifier = 3005; scheduler = 3006 }
+    $EnvName = if ($Name -eq "scheduler") { "SCHEDULER_PORT" } else { "PORT_" + $Name.ToUpper() }
+    $EnvFile = Join-Path $ProjectRoot ".env"
+    if (Test-Path $EnvFile) {
+        foreach ($Line in Get-Content $EnvFile) {
+            if ($Line -match "^\s*$EnvName\s*=\s*[""']?(\d+)") { return [int]$Matches[1] }
+        }
+    }
+    return [int]$Defaults[$Name]
+}
+
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $ProjectRoot "data") | Out-Null
 
@@ -84,7 +99,8 @@ foreach ($Service in $Services) {
     # Clear a stale stop marker left behind by a previous hard kill (Issue 6)
     Remove-Item (Join-Path $LogDir "$Service.stop") -Force -ErrorAction SilentlyContinue
 
-    Write-Host "Starting $Service..." -ForegroundColor Green
+    $Port = Get-ServicePort $Service
+    Write-Host "Starting $Service on 127.0.0.1:$Port..." -ForegroundColor Green
 
     $Process = Start-Process `
         -FilePath (Get-Command node).Source `
@@ -118,7 +134,45 @@ if ($Started.Count -gt 0) {
     }
 }
 
+# Service board: endpoint, status, PID, log file and last event, so the whole
+# stack is visible at a glance and shows activity as services are called.
+if ($Started.Count -gt 0) {
+    Write-Host "`nServices" -ForegroundColor Cyan
+    Write-Host ("{0,-11} {1,-15} {2,-9} {3,-7} {4,-24} {5}" -f `
+        "Service", "Endpoint", "Status", "PID", "Log", "Last event") -ForegroundColor DarkGray
+
+    foreach ($Entry in $Started) {
+        $Port = Get-ServicePort $Entry.Service
+
+        $Status = "down"
+        try {
+            $Health = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/health" -TimeoutSec 3
+            if ($Health.service -eq $Entry.Service) { $Status = "healthy" } else { $Status = "unexpected" }
+        }
+        catch { }
+
+        $Jsonl = Join-Path $LogDir "$($Entry.Service).jsonl"
+        $LastEvent = "-"
+        if (Test-Path $Jsonl) {
+            $Line = Get-Content $Jsonl -Tail 1 -ErrorAction SilentlyContinue
+            if ($Line) {
+                try {
+                    $Event = $Line | ConvertFrom-Json
+                    $LastEvent = "$($Event.event)  $((Get-Date $Event.ts).ToString('HH:mm:ss'))"
+                }
+                catch { $LastEvent = "(unparsed line)" }
+            }
+        }
+
+        $Cells = @($Entry.Service, "127.0.0.1:$Port", $Status, $Entry.ProcessId, "logs\$($Entry.Service).jsonl", $LastEvent)
+        $Row = "{0,-11} {1,-15} {2,-9} {3,-7} {4,-24} {5}" -f $Cells
+        if ($Status -eq "healthy") { Write-Host $Row -ForegroundColor Green }
+        else { Write-Host $Row -ForegroundColor Red }
+    }
+}
+
 Write-Host "`nStartup commands completed." -ForegroundColor Cyan
 Write-Host "Started processes: $($Started.Count)"
 Write-Host "Logs: $LogDir"
 Write-Host "Stop with: .\stop-etl.ps1"
+Write-Host "Watch:     Get-Content .\logs\*.jsonl -Wait -Tail 5"
