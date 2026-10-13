@@ -158,22 +158,38 @@ idempotent.
 
 ### Tasks
 
-- [ ] Create `data/` if missing and open the database with `PRAGMA journal_mode=WAL`.
-- [ ] `transactions` table: `id`, `external_id`, `source`, `amount_minor`, `currency`, `transaction_ts`, `payload_json`, `dedupe_hash TEXT UNIQUE`, `created_at`.
-- [ ] `etl_runs` table: `run_id`, `started_at`, `finished_at`, `status`, `rows_in`, `rows_out`, `error`.
-- [ ] `notifications` table: `id`, `channel`, `subject`, `body`, `sent_at`.
-- [ ] Indexes on `transactions.transaction_ts` and `etl_runs.started_at`.
-- [ ] Use `IF NOT EXISTS` everywhere so a second run changes nothing.
+- [x] Create `data/` if missing and open the database with `PRAGMA journal_mode=WAL`.
+- [x] `transactions` table: `id`, `external_id`, `source`, `amount_minor`, `currency`, `transaction_ts`, `payload_json`, `dedupe_hash TEXT UNIQUE`, `created_at`.
+- [x] `etl_runs` table: `run_id`, `started_at`, `finished_at`, `status`, `rows_in`, `rows_out`, `error`.
+- [x] `notifications` table: `id`, `channel`, `subject`, `body`, `sent_at`.
+- [x] Indexes on `transactions.transaction_ts` and `etl_runs.started_at`.
+- [x] Use `IF NOT EXISTS` everywhere so a second run changes nothing.
 
 ### Acceptance criteria
 
-- [ ] `node scripts/init-db.js` succeeds twice in a row.
-- [ ] Inserting the same `dedupe_hash` twice is rejected by the unique constraint.
-- [ ] `.\start-etl.ps1` gets past the database step and starts reaching the per-service loop.
+- [x] `node scripts/init-db.js` succeeds twice in a row.
+- [x] Inserting the same `dedupe_hash` twice is rejected by the unique constraint.
+- [x] `.\start-etl.ps1` gets past the database step and starts reaching the per-service loop.
 
 ### Dependencies
 
 Issue 2.
+
+### Day 3 notes
+
+Verified on 2026-10-13:
+
+- `npm run db:init` twice: first run creates `data/pos.db` in WAL mode, the
+  second opens it and changes nothing; both exit 0.
+- A duplicate `dedupe_hash` insert is rejected with
+  `UNIQUE constraint failed: transactions.dedupe_hash` and exactly one row remains.
+- `.\start-etl.ps1` initializes the database and reaches the six per-service
+  warnings, exit 0.
+- Schema choices: `amount_minor` is INTEGER cents (no float drift), timestamps
+  are ISO-8601 text, `etl_runs.run_id` is the primary key for run tracking, and
+  `dedupe_hash` is what the loader will use for `INSERT OR IGNORE` on Day 7.
+- Behavior change: `db:init` now loads config like the services do, so a `.env`
+  must exist — on a fresh checkout copy `.env.example` to `.env` first (Issue 2).
 
 ---
 
