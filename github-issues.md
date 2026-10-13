@@ -339,18 +339,64 @@ Verified on 2026-10-13:
 
 ### Tasks
 
-- [ ] Add `services/shared/logger.js`: one JSON-lines file per service under `logs\` plus mirrored console output (so `start-etl.ps1` redirection stays useful).
-- [ ] Add a retry helper (3 attempts, exponential backoff) used by the extractor and loader HTTP calls.
-- [ ] Make the loader use `INSERT OR IGNORE` keyed on `dedupe_hash` and report `skipped_duplicates`.
-- [ ] Add `scripts/smoke-test.js` that runs extract → transform → load against fixture data and asserts row counts and dedupe behaviour.
-- [ ] Update README section 6 with the new commands (`npm run health`, `npm run smoke`, log locations).
+- [x] Add `services/shared/logger.js`: one JSON-lines file per service under `logs\` plus mirrored console output (so `start-etl.ps1` redirection stays useful).
+- [x] Add a retry helper (3 attempts, exponential backoff) used by the extractor and loader HTTP calls.
+- [x] Make the loader use `INSERT OR IGNORE` keyed on `dedupe_hash` and report `skipped_duplicates`.
+- [x] Add `scripts/smoke-test.js` that runs extract → transform → load against fixture data and asserts row counts and dedupe behaviour.
+- [x] Update README section 6 with the new commands (`npm run health`, `npm run smoke`, log locations).
 
 ### Acceptance criteria
 
-- [ ] Running the smoke test twice in a row inserts rows only once.
-- [ ] `logs\*.jsonl` contains one line per event for a full pipeline run.
-- [ ] A new contributor can start, verify, and stop the stack using only the README.
+- [x] Running the smoke test twice in a row inserts rows only once.
+- [x] `logs\*.jsonl` contains one line per event for a full pipeline run.
+- [x] A new contributor can start, verify, and stop the stack using only the README.
 
 ### Dependencies
 
 Issues 5 and 6.
+
+### Day 7 notes
+
+Verified on 2026-10-13:
+
+- `services/shared/logger.js` appends one JSON object per event to
+  `logs\<service>.jsonl` and mirrors every line to the console, so the
+  `.out/.err` capture from `start-etl.ps1` keeps working; a failed log write
+  never takes a service down. All six services now emit structured events
+  (startup, extract, transform, load, report, notify, cron, pipeline, retry,
+  error, shutdown).
+- `services/shared/retry.js`: 3 attempts, 250 ms -> 500 ms backoff; retries
+  transport errors and HTTP 5xx, fails fast on 4xx and malformed bodies.
+  Wired into the extractor's Google Sheets call and every scheduler hop
+  (extract/transform/load/notify) - which is how the pipeline's POST /load
+  call gets retried. Retrying /load is safe because INSERT OR IGNORE is
+  idempotent per dedupe_hash.
+- Retries verified three ways: unit (3 attempts, 774 ms total), a live 5xx
+  probe (endpoint hit exactly 3x, `{"event":"retry",...}` warn lines in the
+  jsonl), and the real 08:45 cron tick (scheduler retried the extractor's
+  500s, then logged `pipeline_failed` followed by a `notify`).
+- Loader duplicate protection (INSERT OR IGNORE + `skipped_duplicates`) was
+  already Day 5 code; the smoke test now proves it end to end: run 1 loaded
+  2 rows (before=0), run 2 loaded 0 and skipped 2 (before=2), the database
+  held exactly 2 `SMOKE-` rows after both, and `etl_runs.rows_out=0` for the
+  duplicate run.
+- `npm run smoke` = 11 checks, green on consecutive runs. It starts a
+  throwaway extractor on port 3099 with `LOG_DIR=logs\smoke` against an
+  in-process mock Sheets endpoint, drives the real transformer and loader,
+  and finishes by asserting the jsonl logs received the run.
+- JSON-lines AC: 6 `logs\*.jsonl` files, 40 events, every line a parseable
+  `{ts,service,level,event,...}` object - including a full cron pipeline run
+  (retry -> pipeline_failed -> notify) and `shutdown` events from all six
+  services. The files append across restarts (12 startup / 12 shutdown
+  events after two start-stop cycles); DB `integrity_check` = ok throughout.
+- README section 6 now covers first-time setup (`npm install`, `.env`),
+  `npm run health`, `npm run smoke`, the graceful stop, and both log
+  locations; sections 4/5 warn not to overwrite the shipped scripts with the
+  starter listings. Every documented command was executed during
+  verification: start -> health -> smoke x2 -> stop -> restart -> stop.
+- Until `SHEETS_ENDPOINT` points at a real endpoint, cron runs end in
+  `pipeline_failed` + a `notify` (the placeholder 404s) - that is the
+  documented retry/failure path working as designed, not a defect.
+- Session note: PR #12's main-into-day6 merge had resolved `app.js` to the
+  Day 5 copy, dropping the Issue 6 shutdown/banner code; restored on `day6`
+  (4123576) before Day 7 was built on top of it.

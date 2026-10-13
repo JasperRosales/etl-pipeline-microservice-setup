@@ -6,43 +6,69 @@
 //   POST /extract -> POST /transform -> POST /load -> POST /notify
 // threading the run_id from the extractor into the loader, and notifying the
 // outcome on both success and failure.
+//
+// Every hop is retried (Issue 7): 3 attempts with exponential backoff,
+// transport errors and 5xx only. Retrying POST /load is safe because the
+// loader's INSERT OR IGNORE is idempotent per dedupe_hash; a retried /extract
+// simply mints a fresh run_id.
 
 "use strict";
 
 const cron = require("node-cron");
 const { start } = require("../shared/app");
+const { withRetry } = require("../shared/retry");
 
 start("scheduler", (app, ctx) => {
-  const { config } = ctx;
+  const { config, log } = ctx;
   const base = (name) => `http://${config.host}:${config.services[name].port}`;
 
   async function post(name, route, payload) {
-    const url = `${base(name)}${route}`;
-    let response;
-    try {
-      response = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(10000),
-      });
-    } catch (err) {
-      throw new Error(`${name}${route} unreachable: ${err.message}`);
-    }
-    const text = await response.text();
-    const data = text ? JSON.parse(text) : {};
-    if (!response.ok) {
-      const envelope = data && data.error ? data.error.message : text;
-      throw new Error(`${name}${route} failed (${response.status}): ${envelope}`);
-    }
-    return data;
+    return withRetry(
+      async () => {
+        const url = `${base(name)}${route}`;
+        let response;
+        try {
+          response = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+            signal: AbortSignal.timeout(10000),
+          });
+        } catch (err) {
+          throw new Error(`${name}${route} unreachable: ${err.message}`); // no status -> retried
+        }
+        const text = await response.text();
+        let data;
+        try {
+          data = text ? JSON.parse(text) : {};
+        } catch {
+          const error = new Error(`${name}${route} returned malformed JSON`);
+          error.noRetry = true;
+          throw error;
+        }
+        if (!response.ok) {
+          const envelope = data && data.error ? data.error.message : text;
+          const error = new Error(`${name}${route} failed (${response.status}): ${envelope}`);
+          error.status = response.status;
+          throw error;
+        }
+        return data;
+      },
+      {
+        attempts: 3,
+        label: `scheduler->${name}${route}`,
+        shouldRetry: (err) => !err.noRetry && (err.status === undefined || err.status >= 500),
+        onRetry: (err, attempt, delayMs) =>
+          log.warn("retry", { target: `${name}${route}`, attempt, delay_ms: delayMs, message: err.message }),
+      }
+    );
   }
 
   async function notify(subject, message) {
     try {
       await post("notifier", "/notify", { channel: "log", subject, body: message });
     } catch (err) {
-      console.error(JSON.stringify({ event: "notify_failed", service: "scheduler", message: err.message }));
+      log.error("notify_failed", { message: err.message });
     }
   }
 
@@ -57,20 +83,26 @@ start("scheduler", (app, ctx) => {
       });
 
       const summary = `run ${extracted.run_id}: extracted ${extracted.rows}, loaded ${loaded.inserted}, duplicates ${loaded.skipped_duplicates}, rejected ${transformed.rejected.length} (${Date.now() - startedAt}ms)`;
-      console.log(JSON.stringify({ event: "pipeline_ok", service: "scheduler", run_id: extracted.run_id, inserted: loaded.inserted, skipped: loaded.skipped_duplicates, rejected: transformed.rejected.length }));
+      log.info("pipeline_ok", {
+        run_id: extracted.run_id,
+        inserted: loaded.inserted,
+        skipped: loaded.skipped_duplicates,
+        rejected: transformed.rejected.length,
+        duration_ms: Date.now() - startedAt,
+      });
       await notify("ETL run completed", summary);
     } catch (err) {
-      console.error(JSON.stringify({ event: "pipeline_failed", service: "scheduler", message: err.message, duration_ms: Date.now() - startedAt }));
+      log.error("pipeline_failed", { message: err.message, duration_ms: Date.now() - startedAt });
       await notify("ETL run failed", err.message);
     }
   }
 
   if (!cron.validate(config.etlCron)) {
-    console.error(`[scheduler] ETL_CRON is not a valid cron expression: "${config.etlCron}"`);
+    log.error("invalid_cron", { cron: config.etlCron });
     process.exit(1);
   }
   cron.schedule(config.etlCron, () => {
     runPipeline();
   });
-  console.log(JSON.stringify({ event: "cron_scheduled", service: "scheduler", cron: config.etlCron }));
+  log.info("cron_scheduled", { cron: config.etlCron });
 });

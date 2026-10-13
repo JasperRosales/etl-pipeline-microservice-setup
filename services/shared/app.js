@@ -1,4 +1,5 @@
-// Shared HTTP bootstrap for every service (Issue 5, Day 5; shutdown added Issue 6, Day 6).
+// Shared HTTP bootstrap for every service (Issue 5, Day 5; shutdown added Issue 6, Day 6;
+// structured logging added Issue 7, Day 7).
 //
 // Guarantees the common rules from docs/http-contract.md without repeating them:
 //   - GET /health with the documented shape on every service
@@ -7,6 +8,8 @@
 //   - binds 127.0.0.1 only, one structured JSON startup line on stdout
 //   - exits 1 with the readable config error (no stack) when .env is invalid
 //   - graceful shutdown on SIGINT/SIGTERM and on logs\<service>.stop (Windows)
+//   - every event goes to logs\<service>.jsonl (one JSON object per line) and is
+//     mirrored to the console, so start-etl.ps1's .out/.err capture stays useful
 
 "use strict";
 
@@ -14,6 +17,7 @@ const express = require("express");
 const fs = require("fs");
 const path = require("path");
 
+const { createLogger } = require("./logger");
 const pkg = require(path.join(__dirname, "..", "..", "package.json"));
 
 function sendError(res, status, code, message) {
@@ -30,10 +34,11 @@ function loadConfig(serviceName) {
   }
 }
 
-// routes(app, ctx) mounts the service's own endpoints. ctx = { config, sendError }.
+// routes(app, ctx) mounts the service's own endpoints. ctx = { config, sendError, log }.
 function start(serviceName, routes) {
   const config = loadConfig(serviceName);
   const service = config.services[serviceName];
+  const log = createLogger(serviceName, config.logDir);
   const app = express();
 
   app.disable("x-powered-by");
@@ -49,7 +54,7 @@ function start(serviceName, routes) {
     });
   });
 
-  routes(app, { config, sendError });
+  routes(app, { config, sendError, log });
 
   // Error middleware (after routes so it catches their failures too).
   app.use((err, req, res, next) => {
@@ -59,7 +64,7 @@ function start(serviceName, routes) {
     if (err && err.type === "entity.too.large") {
       return sendError(res, 413, "invalid_request", "request body exceeds the 5 MB limit");
     }
-    console.error(JSON.stringify({ event: "error", service: serviceName, message: (err && err.message) || "unknown error" }));
+    log.error("error", { message: (err && err.message) || "unknown error" });
     sendError(res, 500, "internal_error", "unexpected server error");
   });
 
@@ -74,20 +79,10 @@ function start(serviceName, routes) {
     console.log(`=== ${banner} ${"=".repeat(Math.max(0, 40 - banner.length))}`);
     console.log(`    listening on http://${config.host}:${service.port}  (v${pkg.version})`);
     console.log("===".padEnd(43, "="));
-    console.log(
-      JSON.stringify({
-        event: "startup",
-        service: serviceName,
-        host: config.host,
-        port: service.port,
-        version: pkg.version,
-      })
-    );
+    log.info("startup", { host: config.host, port: service.port, version: pkg.version });
   });
   server.on("error", (err) => {
-    console.error(
-      JSON.stringify({ event: "startup_failed", service: serviceName, port: service.port, error: err.message })
-    );
+    log.error("startup_failed", { port: service.port, error: err.message });
     process.exit(1);
   });
 
@@ -98,7 +93,7 @@ function start(serviceName, routes) {
   function shutdown(reason) {
     if (stopping) return;
     stopping = true;
-    console.log(JSON.stringify({ event: "shutdown", service: serviceName, reason }));
+    log.info("shutdown", { reason });
     server.close(() => process.exit(0));
     // Failsafe: never hang the stop sequence (e.g. a stuck keep-alive socket).
     setTimeout(() => process.exit(0), 3000).unref();

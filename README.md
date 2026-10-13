@@ -192,6 +192,8 @@ This script assumes:
 
 This is a starter script, not a complete implementation of the database initializer or microservices. It launches services as separate processes and records their process IDs for shutdown.
 
+The repository already ships a `start-etl.ps1` with everything above plus dependency installation, duplicate-startup protection, stale stop-marker cleanup, and a readiness wait on `GET /health` for every service before it reports success. Use the shipped file — do not replace it with the starter listing above.
+
 ## 5. PowerShell stop script
 
 Save the following as `stop-etl.ps1` in the project root.
@@ -220,11 +222,18 @@ Remove-Item $PidFile -Force
 Write-Host "Stop commands completed."
 ```
 
-This basic stop script stops the recorded Node.js processes. For a more robust implementation, services should handle graceful shutdown, and the stop script should verify process identity before terminating a process.
+This basic stop script stops the recorded Node.js processes. The repository already ships a hardened `stop-etl.ps1`: it unwraps PowerShell 5.1's single-object JSON array, refuses to touch a PID that is no longer a `node` process, writes a `logs\<service>.stop` marker for a graceful shutdown, waits 5 seconds, and only then force-kills. Use the shipped file — do not replace it with the starter listing above.
 
 ## 6. Running the system
 
 Open PowerShell in the project directory.
+
+### First-time setup
+
+```powershell
+npm install
+Copy-Item .env.example .env    # then edit SHEETS_ENDPOINT and API_TOKEN
+```
 
 ### Start all services
 
@@ -232,17 +241,48 @@ Open PowerShell in the project directory.
 .\start-etl.ps1
 ```
 
-### Stop all recorded services
+Initializes the database, starts all six services, and waits until every one answers `GET /health` before printing `Startup commands completed.`
+
+### Check service health
+
+```powershell
+npm run health
+```
+
+Exit code `0` = all six services healthy (script-friendly); `1` = at least one service is down.
+
+### Run the end-to-end smoke test
+
+```powershell
+npm run smoke
+```
+
+Drives the full extract -> transform -> load pipeline against fixture data and asserts row counts and duplicate protection. Requires the stack to be running. Safe to rerun as often as you like: fixture rows are prefixed `SMOKE-` and are inserted into the database exactly once ever — later runs report them as `skipped_duplicates`.
+
+### Stop all services
 
 ```powershell
 .\stop-etl.ps1
 ```
+
+Asks each service to shut down gracefully via a `logs\<service>.stop` marker, waits 5 seconds, then force-kills only what is still alive (and only after verifying the PID belongs to a `node` process).
 
 ### View recent extractor errors
 
 ```powershell
 Get-Content .\logs\extractor.err.log -Tail 50
 ```
+
+### View the structured event log
+
+```powershell
+Get-Content .\logs\extractor.jsonl -Tail 50
+```
+
+Every service writes one JSON object per line:
+
+- `logs\<service>.jsonl` — structured events: startup, extract, transform, load, retries, errors, shutdown.
+- `logs\<service>.out.log` / `logs\<service>.err.log` — captured console output (the welcome banner plus the mirrored event lines).
 
 The first run requires the database initialization script and service entry points to exist. The startup script skips any service whose `index.js` file is missing.
 
