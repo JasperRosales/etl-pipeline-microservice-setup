@@ -241,7 +241,13 @@ Copy-Item .env.example .env    # then edit SHEETS_ENDPOINT and API_TOKEN
 .\start-etl.ps1
 ```
 
-Initializes the database, starts all six services, and waits until every one answers `GET /health` before printing `Startup commands completed.`
+Initializes the database, starts all six services, and waits until every one answers `GET /health` before printing `Startup commands completed.` Every `Starting ...` line shows the endpoint, and the run ends with a service board — endpoint, status (green/red), PID, log file and last event per service:
+
+```text
+Service     Endpoint        Status    PID     Log                      Last event
+extractor   127.0.0.1:3001  healthy   10636   logs\extractor.jsonl     startup  17:00:34
+transformer 127.0.0.1:3002  healthy   3828    logs\transformer.jsonl   startup  17:00:34
+```
 
 ### Check service health
 
@@ -283,6 +289,14 @@ Every service writes one JSON object per line:
 
 - `logs\<service>.jsonl` — structured events: startup, extract, transform, load, retries, errors, shutdown.
 - `logs\<service>.out.log` / `logs\<service>.err.log` — captured console output (the welcome banner plus the mirrored event lines).
+
+### Watch live service events
+
+```powershell
+Get-Content .\logs\*.jsonl -Wait -Tail 5
+```
+
+Tails every service's event log at once: call a service (or let the cron pipeline run) and the event it just logged — `extract`, `transform`, `load`, `retry`, `shutdown` — appears immediately. Press `Ctrl+C` to stop watching.
 
 The first run requires the database initialization script and service entry points to exist. The startup script skips any service whose `index.js` file is missing.
 

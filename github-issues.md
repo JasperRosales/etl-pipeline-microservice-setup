@@ -400,3 +400,9 @@ Verified on 2026-10-13:
 - Session note: PR #12's main-into-day6 merge had resolved `app.js` to the
   Day 5 copy, dropping the Issue 6 shutdown/banner code; restored on `day6`
   (4123576) before Day 7 was built on top of it.
+- Follow-up UX: `start-etl.ps1` now prints each service's endpoint as it
+  starts (`Starting extractor on 127.0.0.1:3001...`, port resolved from
+  `.env` like `config.js`) and a final green/red service board (endpoint,
+  status, PID, log file, last event parsed from the jsonl); `npm run health`
+  shows `host:port` per service; README section 6 documents the live watch
+  command (`Get-Content .\logs\*.jsonl -Wait -Tail 5`).
