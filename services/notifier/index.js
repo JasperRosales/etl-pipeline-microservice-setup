@@ -14,7 +14,7 @@ const { start, sendError } = require("../shared/app");
 const CHANNELS = ["log", "email", "webhook"];
 
 start("notifier", (app, ctx) => {
-  const { config } = ctx;
+  const { config, log } = ctx;
 
   app.post("/notify", (req, res) => {
     const body = req.body || {};
@@ -41,11 +41,11 @@ start("notifier", (app, ctx) => {
         .run(body.channel, body.subject, body.body, new Date().toISOString());
 
       const delivered = body.channel === "log";
-      console.log(JSON.stringify({ event: "notify", service: "notifier", channel: body.channel, subject: body.subject, delivered }));
+      log.info("notify", { channel: body.channel, subject: body.subject, delivered });
 
       res.json({ delivered, channel: body.channel, notification_id: info.lastInsertRowid });
     } catch (err) {
-      console.error(JSON.stringify({ event: "notify_failed", service: "notifier", message: err.message }));
+      log.error("notify_failed", { message: err.message });
       sendError(res, 500, "internal_error", `notification write failed: ${err.message}`);
     } finally {
       db.close();

@@ -10,7 +10,7 @@ const Database = require("better-sqlite3");
 const { start, sendError } = require("../shared/app");
 
 start("reporter", (app, ctx) => {
-  const { config } = ctx;
+  const { config, log } = ctx;
 
   app.get("/report/daily", (req, res) => {
     const date = req.query.date;
@@ -38,6 +38,8 @@ start("reporter", (app, ctx) => {
 
       const warnings = row.transactions_count === 0 ? ["no transactions for this date"] : [];
 
+      log.info("report", { date, transactions_count: row.transactions_count });
+
       res.json({
         date,
         generated_at: new Date().toISOString(),
@@ -48,7 +50,7 @@ start("reporter", (app, ctx) => {
         warnings,
       });
     } catch (err) {
-      console.error(JSON.stringify({ event: "report_failed", service: "reporter", message: err.message }));
+      log.error("report_failed", { date, message: err.message });
       sendError(res, 500, "internal_error", `report query failed: ${err.message}`);
     } finally {
       db.close();

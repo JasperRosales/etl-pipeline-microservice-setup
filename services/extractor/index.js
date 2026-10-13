@@ -9,11 +9,16 @@
 //   [ { "id": "TX-1", "amount": "12.50", "currency": "USD", "timestamp": "...", "row": 2 } ]
 // Rows that do not normalize cleanly are passed through; the transformer rejects
 // them with a reason (that is the contract's division of labor).
+//
+// Transient upstream failures are retried (Issue 7): 3 attempts with
+// exponential backoff. Transport errors and 5xx retry; 4xx (e.g. bad token)
+// and malformed 200 bodies are deterministic and fail fast.
 
 "use strict";
 
 const crypto = require("crypto");
 const { start, sendError } = require("../shared/app");
+const { withRetry } = require("../shared/retry");
 
 function toIso(value) {
   if (typeof value !== "string" && typeof value !== "number") return undefined;
@@ -45,25 +50,31 @@ async function fetchSheets({ endpoint, apiToken, since }) {
   });
   const text = await response.text();
   if (!response.ok) {
-    throw new Error(`endpoint responded ${response.status}`);
+    const error = new Error(`endpoint responded ${response.status}`);
+    error.status = response.status;
+    throw error;
   }
 
   let data;
   try {
     data = JSON.parse(text);
   } catch {
-    throw new Error("endpoint did not return valid JSON");
+    const error = new Error("endpoint did not return valid JSON");
+    error.noRetry = true;
+    throw error;
   }
 
   const rows = Array.isArray(data) ? data : Array.isArray(data && data.transactions) ? data.transactions : null;
   if (!rows) {
-    throw new Error("endpoint response was neither an array nor { transactions: [...] }");
+    const error = new Error("endpoint response was neither an array nor { transactions: [...] }");
+    error.noRetry = true;
+    throw error;
   }
   return rows.map(toTransaction);
 }
 
 start("extractor", (app, ctx) => {
-  const { config } = ctx;
+  const { config, log } = ctx;
 
   app.post("/extract", async (req, res) => {
     const body = req.body || {};
@@ -77,15 +88,19 @@ start("extractor", (app, ctx) => {
 
     const runId = crypto.randomUUID();
     try {
-      const transactions = await fetchSheets({
-        endpoint: config.sheets.endpoint,
-        apiToken: config.sheets.apiToken,
-        since,
-      });
-      console.log(JSON.stringify({ event: "extract", service: "extractor", run_id: runId, rows: transactions.length }));
+      const transactions = await withRetry(
+        () => fetchSheets({ endpoint: config.sheets.endpoint, apiToken: config.sheets.apiToken, since }),
+        {
+          attempts: 3,
+          label: "extractor: Google Sheets",
+          shouldRetry: (err) => !err.noRetry && (err.status === undefined || err.status >= 500),
+          onRetry: (err, attempt, delayMs) => log.warn("retry", { attempt, delay_ms: delayMs, message: err.message }),
+        }
+      );
+      log.info("extract", { run_id: runId, rows: transactions.length });
       res.json({ run_id: runId, rows: transactions.length, transactions });
     } catch (err) {
-      console.error(JSON.stringify({ event: "extract_failed", service: "extractor", run_id: runId, message: err.message }));
+      log.error("extract_failed", { run_id: runId, message: err.message });
       sendError(res, 500, "internal_error", `Google Sheets request failed: ${err.message}`);
     }
   });

@@ -9,6 +9,7 @@
   "scripts": {
     "db:init": "node scripts/init-db.js",
     "health": "node scripts/health-check.js",
+    "smoke": "node scripts/smoke-test.js",
     "etl:start": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\start-etl.ps1",
     "etl:stop": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\stop-etl.ps1"
   },

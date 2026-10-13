@@ -36,7 +36,7 @@ function rejectionReason(tx) {
 }
 
 start("transformer", (app, ctx) => {
-  const { sendError } = ctx;
+  const { sendError, log } = ctx;
 
   app.post("/transform", (req, res) => {
     const body = req.body || {};
@@ -61,6 +61,12 @@ start("transformer", (app, ctx) => {
       }
       seen.add(hash);
       transactions.push({ ...tx, dedupe_hash: hash });
+    });
+
+    log.info("transform", {
+      rows_in: body.transactions.length,
+      rows_out: transactions.length,
+      rejected: rejected.length,
     });
 
     res.json({

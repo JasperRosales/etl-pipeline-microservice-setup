@@ -3,7 +3,8 @@
 //
 // Writes transformed transactions with INSERT OR IGNORE keyed on dedupe_hash
 // (README section 9 duplicate protection) inside one transaction, then upserts
-// the etl_runs row for the run_id.
+// the etl_runs row for the run_id. INSERT OR IGNORE is idempotent, which is
+// what makes retried POST /load calls (Issue 7) safe.
 
 "use strict";
 
@@ -28,7 +29,7 @@ ON CONFLICT(run_id) DO UPDATE SET
 `;
 
 start("loader", (app, ctx) => {
-  const { config } = ctx;
+  const { config, log } = ctx;
 
   app.post("/load", (req, res) => {
     const body = req.body || {};
@@ -82,10 +83,10 @@ start("loader", (app, ctx) => {
         rows_out: inserted,
       });
 
-      console.log(JSON.stringify({ event: "load", service: "loader", run_id: runId, inserted, skipped_duplicates: skipped }));
+      log.info("load", { run_id: runId, inserted, skipped_duplicates: skipped });
       res.json({ inserted, skipped_duplicates: skipped });
     } catch (err) {
-      console.error(JSON.stringify({ event: "load_failed", service: "loader", run_id: runId, message: err.message }));
+      log.error("load_failed", { run_id: runId, message: err.message });
       sendError(res, 500, "internal_error", `database write failed: ${err.message}`);
     } finally {
       db.close();
