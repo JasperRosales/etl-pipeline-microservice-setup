@@ -53,7 +53,9 @@ finally {
 
 # Prevent accidental duplicate startup
 if (Test-Path $PidFile) {
+    # Unwrap manually: PS 5.1 ConvertFrom-Json emits a top-level array as one object.
     $Existing = Get-Content $PidFile -Raw | ConvertFrom-Json
+    if ($Existing -isnot [array]) { $Existing = @($Existing) }
     $Running = @($Existing | Where-Object {
         Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue
     })
@@ -79,6 +81,9 @@ foreach ($Service in $Services) {
     $Stdout = Join-Path $LogDir "$Service.out.log"
     $Stderr = Join-Path $LogDir "$Service.err.log"
 
+    # Clear a stale stop marker left behind by a previous hard kill (Issue 6)
+    Remove-Item (Join-Path $LogDir "$Service.stop") -Force -ErrorAction SilentlyContinue
+
     Write-Host "Starting $Service..." -ForegroundColor Green
 
     $Process = Start-Process `
@@ -103,6 +108,15 @@ foreach ($Service in $Services) {
 
 $Started | ConvertTo-Json |
     Set-Content -Path $PidFile -Encoding utf8
+
+# Wait until every started service answers /health before declaring success (Issue 6)
+if ($Started.Count -gt 0) {
+    Write-Host "Waiting for services to become healthy..." -ForegroundColor Yellow
+    node .\scripts\health-check.js --wait 15
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "Some services are not healthy yet. Check the logs in $LogDir."
+    }
+}
 
 Write-Host "`nStartup commands completed." -ForegroundColor Cyan
 Write-Host "Started processes: $($Started.Count)"

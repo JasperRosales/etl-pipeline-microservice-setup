@@ -201,22 +201,36 @@ Verified on 2026-10-13:
 
 ### Tasks
 
-- [ ] Add `docs/http-contract.md` with the port table (extractor 3001, transformer 3002, loader 3003, reporter 3004, notifier 3005, scheduler on its configured port) and the base URL rule `http://127.0.0.1:<port>`.
-- [ ] Define `GET /health` for every service → `{ "service", "status", "version", "uptime_s" }`.
-- [ ] Define `POST /extract { since? }` → `{ run_id, rows, transactions[] }`.
-- [ ] Define `POST /transform { transactions[] }` → `{ rows_in, rows_out, transactions[], rejected[] }`.
-- [ ] Define `POST /load { run_id, transactions[] }` → `{ inserted, skipped_duplicates }`.
-- [ ] Define `GET /report/daily?date=YYYY-MM-DD` and `POST /notify { channel, subject, body }`.
-- [ ] Define the error envelope `{ "error": { "code", "message" } }`, statuses 400 / 500 / 503, JSON only, 10s client timeout.
+- [x] Add `docs/http-contract.md` with the port table (extractor 3001, transformer 3002, loader 3003, reporter 3004, notifier 3005, scheduler on its configured port) and the base URL rule `http://127.0.0.1:<port>`.
+- [x] Define `GET /health` for every service → `{ "service", "status", "version", "uptime_s" }`.
+- [x] Define `POST /extract { since? }` → `{ run_id, rows, transactions[] }`.
+- [x] Define `POST /transform { transactions[] }` → `{ rows_in, rows_out, transactions[], rejected[] }`.
+- [x] Define `POST /load { run_id, transactions[] }` → `{ inserted, skipped_duplicates }`.
+- [x] Define `GET /report/daily?date=YYYY-MM-DD` and `POST /notify { channel, subject, body }`.
+- [x] Define the error envelope `{ "error": { "code", "message" } }`, statuses 400 / 500 / 503, JSON only, 10s client timeout.
 
 ### Acceptance criteria
 
-- [ ] Every endpoint lists method, path, request, response, and failure mode.
-- [ ] Issue 5 can be implemented from this document alone.
+- [x] Every endpoint lists method, path, request, response, and failure mode.
+- [x] Issue 5 can be implemented from this document alone.
 
 ### Dependencies
 
 Issue 2 (ports and configuration come from `.env`).
+
+### Day 4 notes
+
+Verified on 2026-10-13:
+
+- `docs/http-contract.md` covers all six services; every endpoint lists request,
+  response, status codes, and failure modes.
+- Decisions locked in for Day 5: the extractor mints `run_id` and the scheduler
+  threads it into `/load`; the transformer computes `dedupe_hash` (SHA-256 over
+  `source`, `external_id`, `amount_minor`, `currency`, `transaction_ts`); the
+  loader upserts `etl_runs` on success; empty results are always 200, never errors.
+- The curl smoke commands were run against a live listener: on Windows
+  PowerShell 5.1 the `-d` payload needs `\"` escaping (pwsh 7+ drops the
+  backslashes) — documented in the contract's quoting note.
 
 ---
 
@@ -231,21 +245,42 @@ each process's output to `logs\<service>.out.log` / `.err.log`.
 
 ### Tasks
 
-- [ ] Add one `index.js` per service that loads `services/shared/config.js`.
-- [ ] Bind to `127.0.0.1` on the configured port (3001–3005, scheduler on its own).
-- [ ] Implement the endpoints from `docs/http-contract.md`; stub business logic is fine for reporter and notifier as long as the shapes are real.
-- [ ] Implement `GET /health` on every service.
-- [ ] Log one structured startup line and exit with code 1 plus a readable message when configuration is invalid.
+- [x] Add one `index.js` per service that loads `services/shared/config.js`.
+- [x] Bind to `127.0.0.1` on the configured port (3001–3005, scheduler on its own).
+- [x] Implement the endpoints from `docs/http-contract.md`; stub business logic is fine for reporter and notifier as long as the shapes are real.
+- [x] Implement `GET /health` on every service.
+- [x] Log one structured startup line and exit with code 1 plus a readable message when configuration is invalid.
 
 ### Acceptance criteria
 
-- [ ] `.\start-etl.ps1` reports six started processes with no "exited immediately" warnings.
-- [ ] `curl http://127.0.0.1:3001/health` (and 3002–3005) returns the documented JSON.
-- [ ] `logs\<service>.out.log` contains the startup line for each service.
+- [x] `.\start-etl.ps1` reports six started processes with no "exited immediately" warnings.
+- [x] `curl http://127.0.0.1:3001/health` (and 3002–3005) returns the documented JSON.
+- [x] `logs\<service>.out.log` contains the startup line for each service.
 
 ### Dependencies
 
 Issues 3 and 4.
+
+### Day 5 notes
+
+Verified on 2026-10-13:
+
+- All six services start from `.\start-etl.ps1` (6 processes, no warnings), answer
+  `/health` on 3001–3006 with the contract shape, and write a JSON startup line
+  to their `.out.log`. All `.err.log` files empty.
+- 18 endpoint checks passed covering: transform validation + all five rejection
+  reasons + `dedupe_hash`, loader insert then duplicate-skip, reporter day/empty/
+  bad-date, notifier log/stub/bad-channel, extractor 500-envelope on unreachable
+  Sheets + 400 on bad `since`, plus 404 and malformed-JSON envelopes.
+- Full pipeline E2E with a mock Sheets endpoint and a `* * * * *` cron tick:
+  extract 3 → transform (1 rejected: bad amount) → load 2 → notify "ETL run
+  completed". The **second** tick loaded 0 and skipped the same rows as
+  duplicates — cross-run duplicate protection proven end to end.
+- Shared bootstrap lives in `services/shared/app.js` (health, error envelope,
+  5 MB JSON limit, startup line, config-failure exit 1) so the six entry points
+  stay small and contract-consistent.
+- Test rows, cron overrides, and throwaway files were removed afterwards; the
+  stack was restarted from the real `.env` and re-verified healthy.
 
 ---
 
@@ -257,21 +292,42 @@ Issues 3 and 4.
 
 ### Tasks
 
-- [ ] Handle `SIGTERM` / `SIGINT` in every service: stop accepting connections, close the database, exit 0.
-- [ ] Add `scripts/health-check.js` polling every `/health` endpoint with a timeout.
-- [ ] Make `start-etl.ps1` poll `/health` before printing "Startup commands completed."
-- [ ] Make `stop-etl.ps1` request a graceful stop first, wait, then force-kill only if still alive.
-- [ ] Verify a PID belongs to a `node` process before terminating it.
+- [x] Handle `SIGTERM` / `SIGINT` in every service: stop accepting connections, close the database, exit 0.
+- [x] Add `scripts/health-check.js` polling every `/health` endpoint with a timeout.
+- [x] Make `start-etl.ps1` poll `/health` before printing "Startup commands completed."
+- [x] Make `stop-etl.ps1` request a graceful stop first, wait, then force-kill only if still alive.
+- [x] Verify a PID belongs to a `node` process before terminating it.
 
 ### Acceptance criteria
 
-- [ ] `.\stop-etl.ps1` leaves no orphaned node processes and no corrupted `data\pos.db`.
-- [ ] `npm run health` exits 0 while the stack is up and 1 after it stops.
-- [ ] Restarting immediately after stopping works without manual cleanup.
+- [x] `.\stop-etl.ps1` leaves no orphaned node processes and no corrupted `data\pos.db`.
+- [x] `npm run health` exits 0 while the stack is up and 1 after it stops.
+- [x] Restarting immediately after stopping works without manual cleanup.
 
 ### Dependencies
 
 Issue 5.
+
+### Day 6 notes
+
+Verified on 2026-10-13:
+
+- Graceful stop on Windows uses a stop marker (`logs\<service>.stop`) because
+  `Stop-Process` cannot deliver SIGTERM to a console process; services also
+  handle SIGINT/SIGTERM where the OS can send them. All six services log
+  `{"event":"shutdown","reason":"stop-file"}` and exit 0.
+- `.\stop-etl.ps1` refuses to touch a PID that is not a node process, waits 5s
+  for a graceful exit, and only then force-kills (both paths verified live).
+- `start-etl.ps1` waits for `/health` on every started service (`--wait 15`)
+  before printing "Startup commands completed"; full start-to-healthy ≈ 3.5s.
+- **Two bugs found and fixed while testing:** (1) `npm run health` crashed with a
+  libuv assertion on exit because fetch keep-alive sockets were still closing —
+  probes now use `node:http` with `agent: false`; (2) the README's PID-file
+  parsing nests arrays on Windows PowerShell 5.1 (`ConvertFrom-Json` emits a
+  top-level JSON array as one object), which silently made the stop script a
+  no-op with 6 running services — both scripts now unwrap it explicitly.
+- `PRAGMA integrity_check` = ok after stops; immediate restart works with no
+  manual cleanup.
 
 ---
 
