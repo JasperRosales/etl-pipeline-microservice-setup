@@ -201,22 +201,36 @@ Verified on 2026-10-13:
 
 ### Tasks
 
-- [ ] Add `docs/http-contract.md` with the port table (extractor 3001, transformer 3002, loader 3003, reporter 3004, notifier 3005, scheduler on its configured port) and the base URL rule `http://127.0.0.1:<port>`.
-- [ ] Define `GET /health` for every service → `{ "service", "status", "version", "uptime_s" }`.
-- [ ] Define `POST /extract { since? }` → `{ run_id, rows, transactions[] }`.
-- [ ] Define `POST /transform { transactions[] }` → `{ rows_in, rows_out, transactions[], rejected[] }`.
-- [ ] Define `POST /load { run_id, transactions[] }` → `{ inserted, skipped_duplicates }`.
-- [ ] Define `GET /report/daily?date=YYYY-MM-DD` and `POST /notify { channel, subject, body }`.
-- [ ] Define the error envelope `{ "error": { "code", "message" } }`, statuses 400 / 500 / 503, JSON only, 10s client timeout.
+- [x] Add `docs/http-contract.md` with the port table (extractor 3001, transformer 3002, loader 3003, reporter 3004, notifier 3005, scheduler on its configured port) and the base URL rule `http://127.0.0.1:<port>`.
+- [x] Define `GET /health` for every service → `{ "service", "status", "version", "uptime_s" }`.
+- [x] Define `POST /extract { since? }` → `{ run_id, rows, transactions[] }`.
+- [x] Define `POST /transform { transactions[] }` → `{ rows_in, rows_out, transactions[], rejected[] }`.
+- [x] Define `POST /load { run_id, transactions[] }` → `{ inserted, skipped_duplicates }`.
+- [x] Define `GET /report/daily?date=YYYY-MM-DD` and `POST /notify { channel, subject, body }`.
+- [x] Define the error envelope `{ "error": { "code", "message" } }`, statuses 400 / 500 / 503, JSON only, 10s client timeout.
 
 ### Acceptance criteria
 
-- [ ] Every endpoint lists method, path, request, response, and failure mode.
-- [ ] Issue 5 can be implemented from this document alone.
+- [x] Every endpoint lists method, path, request, response, and failure mode.
+- [x] Issue 5 can be implemented from this document alone.
 
 ### Dependencies
 
 Issue 2 (ports and configuration come from `.env`).
+
+### Day 4 notes
+
+Verified on 2026-10-13:
+
+- `docs/http-contract.md` covers all six services; every endpoint lists request,
+  response, status codes, and failure modes.
+- Decisions locked in for Day 5: the extractor mints `run_id` and the scheduler
+  threads it into `/load`; the transformer computes `dedupe_hash` (SHA-256 over
+  `source`, `external_id`, `amount_minor`, `currency`, `transaction_ts`); the
+  loader upserts `etl_runs` on success; empty results are always 200, never errors.
+- The curl smoke commands were run against a live listener: on Windows
+  PowerShell 5.1 the `-d` payload needs `\"` escaping (pwsh 7+ drops the
+  backslashes) — documented in the contract's quoting note.
 
 ---
 
