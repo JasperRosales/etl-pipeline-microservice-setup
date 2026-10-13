@@ -245,21 +245,42 @@ each process's output to `logs\<service>.out.log` / `.err.log`.
 
 ### Tasks
 
-- [ ] Add one `index.js` per service that loads `services/shared/config.js`.
-- [ ] Bind to `127.0.0.1` on the configured port (3001–3005, scheduler on its own).
-- [ ] Implement the endpoints from `docs/http-contract.md`; stub business logic is fine for reporter and notifier as long as the shapes are real.
-- [ ] Implement `GET /health` on every service.
-- [ ] Log one structured startup line and exit with code 1 plus a readable message when configuration is invalid.
+- [x] Add one `index.js` per service that loads `services/shared/config.js`.
+- [x] Bind to `127.0.0.1` on the configured port (3001–3005, scheduler on its own).
+- [x] Implement the endpoints from `docs/http-contract.md`; stub business logic is fine for reporter and notifier as long as the shapes are real.
+- [x] Implement `GET /health` on every service.
+- [x] Log one structured startup line and exit with code 1 plus a readable message when configuration is invalid.
 
 ### Acceptance criteria
 
-- [ ] `.\start-etl.ps1` reports six started processes with no "exited immediately" warnings.
-- [ ] `curl http://127.0.0.1:3001/health` (and 3002–3005) returns the documented JSON.
-- [ ] `logs\<service>.out.log` contains the startup line for each service.
+- [x] `.\start-etl.ps1` reports six started processes with no "exited immediately" warnings.
+- [x] `curl http://127.0.0.1:3001/health` (and 3002–3005) returns the documented JSON.
+- [x] `logs\<service>.out.log` contains the startup line for each service.
 
 ### Dependencies
 
 Issues 3 and 4.
+
+### Day 5 notes
+
+Verified on 2026-10-13:
+
+- All six services start from `.\start-etl.ps1` (6 processes, no warnings), answer
+  `/health` on 3001–3006 with the contract shape, and write a JSON startup line
+  to their `.out.log`. All `.err.log` files empty.
+- 18 endpoint checks passed covering: transform validation + all five rejection
+  reasons + `dedupe_hash`, loader insert then duplicate-skip, reporter day/empty/
+  bad-date, notifier log/stub/bad-channel, extractor 500-envelope on unreachable
+  Sheets + 400 on bad `since`, plus 404 and malformed-JSON envelopes.
+- Full pipeline E2E with a mock Sheets endpoint and a `* * * * *` cron tick:
+  extract 3 → transform (1 rejected: bad amount) → load 2 → notify "ETL run
+  completed". The **second** tick loaded 0 and skipped the same rows as
+  duplicates — cross-run duplicate protection proven end to end.
+- Shared bootstrap lives in `services/shared/app.js` (health, error envelope,
+  5 MB JSON limit, startup line, config-failure exit 1) so the six entry points
+  stay small and contract-consistent.
+- Test rows, cron overrides, and throwaway files were removed afterwards; the
+  stack was restarted from the real `.env` and re-verified healthy.
 
 ---
 
