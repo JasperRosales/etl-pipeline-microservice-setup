@@ -1,0 +1,14 @@
+{
+  "name": "pos-etl-local",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local POS ETL microservices started with start-etl.ps1",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "db:init": "node scripts/init-db.js",
+    "etl:start": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\start-etl.ps1",
+    "etl:stop": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\stop-etl.ps1"
+  }
+}
