@@ -1,0 +1,12 @@
+# Dependencies
+node_modules/
+
+# Environment and secrets (copy .env.example to .env locally)
+.env
+
+# Service logs (keep the folder, ignore the content)
+logs/*
+!logs/.gitkeep
+
+# Local SQLite database files
+data/*.db*
