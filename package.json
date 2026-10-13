@@ -8,7 +8,17 @@
   },
   "scripts": {
     "db:init": "node scripts/init-db.js",
+    "health": "node scripts/health-check.js",
     "etl:start": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\start-etl.ps1",
     "etl:stop": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\stop-etl.ps1"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.4.1",
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0",
+    "node-cron": "^4.2.1"
+  },
+  "allowScripts": {
+    "better-sqlite3@12.11.1": true
   }
 }

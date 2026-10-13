@@ -112,21 +112,37 @@ section 8 requires credentials to live outside the repository.
 
 ### Tasks
 
-- [ ] Create `package.json` (`private: true`, `engines.node >= 18`) with dependencies `express`, `better-sqlite3`, `dotenv`, `node-cron`.
-- [ ] Add npm scripts: `db:init` → `node scripts/init-db.js`, `etl:start` / `etl:stop` → the PowerShell scripts, `health` → `node scripts/health-check.js`.
-- [ ] Add `.env.example` documenting `PORT_EXTRACTOR=3001` … `PORT_NOTIFIER=3005`, `SCHEDULER_PORT`, `DB_PATH=./data/pos.db`, `SHEETS_ENDPOINT`, `APPS_SCRIPT_URL`, `API_TOKEN`, `LOG_DIR=./logs`, `ETL_CRON`.
-- [ ] Add `services/shared/config.js` that loads `.env`, applies defaults, and fails fast with one readable message when a required value is missing.
-- [ ] Commit `package-lock.json`.
+- [x] Create `package.json` (`private: true`, `engines.node >= 18`) with dependencies `express`, `better-sqlite3`, `dotenv`, `node-cron`.
+- [x] Add npm scripts: `db:init` → `node scripts/init-db.js`, `etl:start` / `etl:stop` → the PowerShell scripts, `health` → `node scripts/health-check.js`.
+- [x] Add `.env.example` documenting `PORT_EXTRACTOR=3001` … `PORT_NOTIFIER=3005`, `SCHEDULER_PORT`, `DB_PATH=./data/pos.db`, `SHEETS_ENDPOINT`, `APPS_SCRIPT_URL`, `API_TOKEN`, `LOG_DIR=./logs`, `ETL_CRON`.
+- [x] Add `services/shared/config.js` that loads `.env`, applies defaults, and fails fast with one readable message when a required value is missing.
+- [ ] Commit `package-lock.json` (generated and verified; pending review of the Day 1 + Day 2 batch).
 
 ### Acceptance criteria
 
-- [ ] A clean `npm install` completes without errors on Windows.
-- [ ] Copying `.env.example` to `.env` is enough to configure every service.
-- [ ] No secret values are committed; `.env` remains ignored.
+- [x] A clean `npm install` completes without errors on Windows.
+- [x] Copying `.env.example` to `.env` is enough to configure every service.
+- [x] No secret values are committed; `.env` remains ignored.
 
 ### Dependencies
 
 Issue 1.
+
+### Day 2 notes
+
+Verified on 2026-10-13:
+
+- Clean `npm install` with `node_modules` deleted completes and `better-sqlite3`
+  loads (SQLite 3.53.2).
+- **npm 12 gotcha:** npm 12 blocks dependency install scripts unless allow-listed,
+  and `better-sqlite3` needs its native build to function. The approval lives in
+  `package.json` as `"allowScripts": { "better-sqlite3@12.11.1": true }`, so a
+  clean checkout builds it automatically — no extra step for teammates.
+- `services/shared/config.js` throws one combined readable error listing every
+  missing required value (`SHEETS_ENDPOINT`, `API_TOKEN`) or malformed port, and
+  names the `.env` file to fix.
+- `npm run health` is wired, but `scripts/health-check.js` only arrives on Day 6 (Issue 6).
+- Local `.env` is a copy of `.env.example` with placeholder values only and stays gitignored.
 
 ---
 
