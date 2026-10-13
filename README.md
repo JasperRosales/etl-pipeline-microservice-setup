@@ -249,6 +249,8 @@ extractor   127.0.0.1:3001  healthy   10636   logs\extractor.jsonl     startup  
 transformer 127.0.0.1:3002  healthy   3828    logs\transformer.jsonl   startup  17:00:34
 ```
 
+The services run in hidden consoles — `npm run etl:start` never pops up a window per service (their output goes to `logs\*.out.log` / `logs\*.err.log` instead) — and every service keeps its own console, so the stack keeps running after you close the terminal. Stop it with `.\stop-etl.ps1`.
+
 ### Check service health
 
 ```powershell

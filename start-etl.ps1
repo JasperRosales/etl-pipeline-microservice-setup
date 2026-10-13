@@ -102,10 +102,15 @@ foreach ($Service in $Services) {
     $Port = Get-ServicePort $Service
     Write-Host "Starting $Service on 127.0.0.1:$Port..." -ForegroundColor Green
 
+    # -WindowStyle Hidden: each service still gets its own console (so it
+    # outlives the terminal that started it), but the window is never shown.
+    # Without it, six blank console windows pop up on start - the service
+    # output already goes to the log files above.
     $Process = Start-Process `
         -FilePath (Get-Command node).Source `
         -ArgumentList "index.js" `
         -WorkingDirectory $ServiceDir `
+        -WindowStyle Hidden `
         -RedirectStandardOutput $Stdout `
         -RedirectStandardError $Stderr `
         -PassThru

@@ -406,3 +406,9 @@ Verified on 2026-10-13:
   status, PID, log file, last event parsed from the jsonl); `npm run health`
   shows `host:port` per service; README section 6 documents the live watch
   command (`Get-Content .\logs\*.jsonl -Wait -Tail 5`).
+- Screen-clutter fix: services now launch with `-WindowStyle Hidden` in
+  `start-etl.ps1`, so `npm run etl:start` no longer opens six blank console
+  windows (verified: zero new visible windows across a full
+  start/health/stop cycle via `EnumWindows`); output still lands in
+  `logs\*.out.log`/`*.err.log`, and each service keeps its own hidden
+  console, so it still outlives the terminal that started it.
