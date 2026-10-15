@@ -14,6 +14,37 @@ Use PowerShell as the single startup command for the local ETL microservices. On
 
 SQLite should be initialized before the services start. The database file and tables can be created automatically if they do not exist.
 
+The main objectives of the project are to:
+
+- provide a simple, local-first ETL workflow for POS-style data;
+- isolate responsibilities into dedicated microservices;
+- make setup and operation repeatable through PowerShell scripts;
+- ensure each pipeline stage can be independently tested and monitored;
+- maintain a clear contract between services via HTTP endpoints and shared configuration; and
+- allow the system to be run and stopped reliably with health checks and graceful shutdown behavior.
+
+The system is organized around six services: extractor, transformer, loader, reporter, notifier, and scheduler. Shared utilities handle configuration, HTTP bootstrapping, structured logging, and database initialization.
+
+## 3.2 Table of Contents
+
+- [Project Overview](docs/project-overview.md)
+- [ETL Setup and System Configuration](docs/etl-setup.md)
+- [Extractor Feature](docs/extractor.md)
+- [Transformer Feature](docs/transformer.md)
+- [Loader Feature](docs/loader.md)
+- [Reporter Feature](docs/reporter.md)
+- [Notifier Feature](docs/notifier.md)
+- [Scheduler Feature](docs/scheduler.md)
+- [Shared Infrastructure and Database](docs/shared-infrastructure.md)
+
+## 3.3 Members
+
+| Member | Role |
+|---|---|
+| Rosales Jasper B. | Master |
+| Mendoza Iladio T. | Documentation |
+| Agquiz Nino Joseph B. | Issuer |
+
 ## 2. Workflow
 
 1. Run `.\start-etl.ps1`.
