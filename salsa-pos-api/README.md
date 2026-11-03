@@ -14,6 +14,18 @@ Deployed on Render as the `salsa-pos-api` web service (root directory `salsa-pos
 | GET | `/transactions/:id?token=…` | token | One sale |
 | POST | `/transactions?token=…` | token | Adds a sale `{ amount, currency?, timestamp?, items?, store_id?, cashier_id?, payment_method? }`. Stored in memory only; it is lost on restart |
 
+`POST /transactions` checks the body in `src/validate.js` and returns `400` if:
+
+- `amount` is not a positive number with at most 2 decimals, or is over 1,000,000
+- `currency` is not a 3-letter code (default `PHP`)
+- `timestamp` cannot be parsed or is in the future
+- `payment_method` is not `cash`, `card`, `gcash` or `maya`
+- `store_id` or `cashier_id` is empty or over 64 characters
+- an entry in `items` has no `name`, a `qty` that is not a positive whole number, or a `unit_price` that is not above 0
+
+These rules match what the ETL transformer accepts. A sale that passes them
+does not end up as a rejected row in the pipeline.
+
 You can send the token as the `token` query parameter (that is what the
 extractor does) or as `Authorization: Bearer <token>`. A missing or wrong token
 gets a `401`.
@@ -37,6 +49,11 @@ npm install
 API_TOKEN=dev-token PORT=18080 npm start
 curl "http://localhost:18080/transactions?token=dev-token&since=2026-10-25T00:00:00Z"
 ```
+
+To record sales from a phone, use the separate private `salsa-pos-ui` repo.
+It proxies to this API and keeps the token in its own `.env`.
+
+Run the tests with `npm test`.
 
 Set the pipeline's `.env` to:
 
