@@ -12,6 +12,8 @@ const Database = require("better-sqlite3");
 const { start, sendError } = require("../shared/app");
 
 const CHANNELS = ["log", "email", "webhook"];
+const MAX_SUBJECT = 200;
+const MAX_BODY = 10_000;
 
 start("notifier", (app, ctx) => {
   const { config, log } = ctx;
@@ -26,6 +28,12 @@ start("notifier", (app, ctx) => {
     }
     if (typeof body.body !== "string") {
       return sendError(res, 400, "invalid_request", "body must be a string");
+    }
+    if (body.subject.length > MAX_SUBJECT) {
+      return sendError(res, 400, "invalid_request", `subject must be at most ${MAX_SUBJECT} characters`);
+    }
+    if (body.body.length > MAX_BODY) {
+      return sendError(res, 400, "invalid_request", `body must be at most ${MAX_BODY} characters`);
     }
 
     let db;

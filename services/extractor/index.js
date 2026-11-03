@@ -19,24 +19,7 @@
 const crypto = require("crypto");
 const { start, sendError } = require("../shared/app");
 const { withRetry } = require("../shared/retry");
-
-function toIso(value) {
-  if (typeof value !== "string" && typeof value !== "number") return undefined;
-  const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
-}
-
-function toTransaction(row) {
-  const cents = typeof row.amount === "string" || typeof row.amount === "number" ? Math.round(Number(row.amount) * 100) : NaN;
-  return {
-    external_id: row.id === undefined || row.id === null ? undefined : String(row.id),
-    source: "google-sheets",
-    amount_minor: cents,
-    currency: typeof row.currency === "string" && row.currency ? row.currency.toUpperCase() : "USD",
-    transaction_ts: toIso(row.timestamp),
-    payload: row,
-  };
-}
+const { toTransaction } = require("./normalize");
 
 async function fetchSheets({ endpoint, apiToken, since }) {
   const url = new URL(endpoint);
