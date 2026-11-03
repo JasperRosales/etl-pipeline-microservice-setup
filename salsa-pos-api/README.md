@@ -50,7 +50,7 @@ API_TOKEN=dev-token PORT=18080 npm start
 curl "http://localhost:18080/transactions?token=dev-token&since=2026-10-25T00:00:00Z"
 ```
 
-To record sales from a phone, use the separate [salsa-pos-ui](https://github.com/JasperRosales/salsa-pos-ui) repo.
+To record sales from a phone, use the separate private `salsa-pos-ui` repo.
 It proxies to this API and keeps the token in its own `.env`.
 
 Run the tests with `npm test`.
