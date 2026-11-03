@@ -8,7 +8,7 @@
 
 ## 1. Data Source and Extraction Specification
 
-- **Source System:** A Google Apps Script Web App or Google Sheets-compatible HTTP endpoint that provides transaction rows.
+- **Source System:** `salsa-pos-api` (`salsa-pos-api/`, deployed at `https://salsa-pos-api.onrender.com/transactions`), or any Google Apps Script Web App / Google Sheets-compatible HTTP endpoint that returns transaction rows in the same shape.
 - **Source Database or File:** JSON returned by the URL configured in `SHEETS_ENDPOINT`; the endpoint may return a JSON array or an object containing a `transactions` array.
 - **Extraction Method:** The Node.js extractor service exposes `POST /extract` on port 3001. It calls the configured endpoint with HTTP `GET`, sends `API_TOKEN` as the `token` query parameter, and optionally passes a normalized `since` value. Each upstream request has a 10-second timeout.
 - **Schedule and Invocation:** The extractor does not schedule itself. It is called by the scheduler service according to `ETL_CRON` (default: every 15 minutes), or can be called directly.
@@ -151,7 +151,9 @@ Google Sheets endpoint, maps them to raw transaction records, and creates the
 file and is called by the scheduler or directly with `POST /extract`.
 
 1. Copy `.env.example` to `.env` in the microservice project root.
-2. Set the required `SHEETS_ENDPOINT` and `API_TOKEN` values.
+2. Keep `SHEETS_ENDPOINT=https://salsa-pos-api.onrender.com/transactions` and
+   `API_TOKEN` exactly as they are in `.env.example`. That token is only for the
+   shared Render deployment of salsa-pos-api.
 3. Start the services with `.\start-etl.ps1` from the microservice project.
 4. Let the scheduler trigger the service or call `POST /extract` on port 3001.
 5. Review the response's `run_id`, `rows`, and `transactions`.
