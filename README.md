@@ -263,8 +263,22 @@ Open PowerShell in the project directory.
 
 ```powershell
 npm install
-Copy-Item .env.example .env    # then edit SHEETS_ENDPOINT and API_TOKEN
+Copy-Item .env.example .env    # then set API_TOKEN (see below)
 ```
+
+The extractor pulls sales from the shared **salsa-pos-api** on Render. `.env.example`
+already points at it, so leave this line as is:
+
+```
+SHEETS_ENDPOINT=https://salsa-pos-api.onrender.com/transactions
+```
+
+Set `API_TOKEN` to the salsa-pos-api token from the project owner. Without it,
+the API responds `401 unauthorized`. To check your settings before starting
+the services, open
+`https://salsa-pos-api.onrender.com/transactions?token=<your token>` in a browser.
+You should see the seeded transactions. The API is on Render's free plan and
+goes to sleep when idle, so the first request can take up to about a minute.
 
 ### Start all services
 
@@ -323,7 +337,7 @@ SQLite is recommended for the local prototype because it does not require a sepa
 
 ## 8. Google Sheets connectivity
 
-The microservices can run locally, but the extractor needs internet access to retrieve Google Sheets data through a Google Apps Script Web App or another configured Sheets API integration.
+The microservices can run locally, but the extractor needs internet access to reach its source API. The default source is the shared salsa-pos-api at `https://salsa-pos-api.onrender.com/transactions` (code in `salsa-pos-api/`). A Google Apps Script Web App that returns the same JSON shape also works.
 
 The extractor should keep credentials and endpoint configuration in `.env` or another appropriate configuration mechanism. Do not commit secrets to the repository.
 
