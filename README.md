@@ -300,7 +300,7 @@ expression such as `*/15 * * * *` for a slower schedule.
 
 ### Add sales from your phone (POS UI)
 
-The POS page lives in a separate private repo, `salsa-pos-ui`. It runs a small
+The POS page lives in a separate repo, [salsa-pos-ui](https://github.com/JasperRosales/salsa-pos-ui). It runs a small
 server that keeps the API token in its own `.env` and forwards sales to
 salsa-pos-api. Publish it to your tailnet with `tailscale serve` and open it on
 your phone. See that repo's README for setup. The scheduler loads new sales on
