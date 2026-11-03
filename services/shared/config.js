@@ -74,7 +74,7 @@ const config = {
   },
   dbPath: fromRoot(optional("DB_PATH", "./data/pos.db")),
   logDir: fromRoot(optional("LOG_DIR", "./logs")),
-  etlCron: optional("ETL_CRON", "*/15 * * * *"),
+  etlCron: optional("ETL_CRON", "*/30 * * * * *"), // every 30 seconds (6-field, seconds first)
   sheets: {
     endpoint: required("SHEETS_ENDPOINT", "Apps Script Web App or Sheets API URL"),
     appsScriptUrl: optional("APPS_SCRIPT_URL", ""),

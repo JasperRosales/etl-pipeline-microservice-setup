@@ -101,8 +101,20 @@ start("scheduler", (app, ctx) => {
     log.error("invalid_cron", { cron: config.etlCron });
     process.exit(1);
   }
-  cron.schedule(config.etlCron, () => {
-    runPipeline();
+  // At a 30-second cadence a slow run (10s timeouts x retries) can outlast the
+  // interval; skip the tick instead of running two pipelines concurrently.
+  let running = false;
+  cron.schedule(config.etlCron, async () => {
+    if (running) {
+      log.warn("tick_skipped", { reason: "previous run still in progress" });
+      return;
+    }
+    running = true;
+    try {
+      await runPipeline();
+    } finally {
+      running = false;
+    }
   });
   log.info("cron_scheduled", { cron: config.etlCron });
 });
