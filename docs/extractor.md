@@ -11,7 +11,7 @@
 - **Source System:** `salsa-pos-api` (`salsa-pos-api/`, deployed at `https://salsa-pos-api.onrender.com/transactions`), or any Google Apps Script Web App / Google Sheets-compatible HTTP endpoint that returns transaction rows in the same shape.
 - **Source Database or File:** JSON returned by the URL configured in `SHEETS_ENDPOINT`; the endpoint may return a JSON array or an object containing a `transactions` array.
 - **Extraction Method:** The Node.js extractor service exposes `POST /extract` on port 3001. It calls the configured endpoint with HTTP `GET`, sends `API_TOKEN` as the `token` query parameter, and optionally passes a normalized `since` value. Each upstream request has a 10-second timeout.
-- **Schedule and Invocation:** The extractor does not schedule itself. It is called by the scheduler service according to `ETL_CRON` (default: every 15 minutes), or can be called directly.
+- **Schedule and Invocation:** The extractor does not schedule itself. It is called by the scheduler service according to `ETL_CRON` (default: every 30 seconds, `*/30 * * * * *`), or can be called directly.
 - **Extraction Scope:** Source transaction rows returned by the endpoint. An optional `since` request value limits the upstream query; no default date window is applied when it is omitted.
 - **Source Limitations and Assumptions:** `SHEETS_ENDPOINT` and `API_TOKEN` must be configured. The upstream endpoint must be reachable and return valid JSON in one of the supported response shapes.
 
@@ -37,7 +37,7 @@ The extractor maps each source row into the raw transaction shape used by the ne
 | Column | Data Type | Key / Relationship |
 |---|---|---|
 | `external_id` | `STRING` or omitted | Source `id` converted to a string; downstream validation requires a usable identifier. |
-| `source` | `STRING` | Constant value `google-sheets`. |
+| `source` | `STRING` | Constant value `salsa-pos-api`. |
 | `amount_minor` | `INTEGER` or invalid numeric value | Source `amount` multiplied by 100 and rounded; validated by the transformer. |
 | `currency` | `STRING` | Uppercased source currency or default `USD`. |
 | `transaction_ts` | ISO 8601 UTC `STRING` or omitted | Normalized from source `timestamp` when parseable; validated by the transformer. |
@@ -91,7 +91,7 @@ The extractor does not report source rows read, rejected-row counts, validation 
 | Source Column | Standardized Column | Source Type | Target Type | Mapping Type |
 |---|---|---|---|---|
 | `id` | `external_id` | Any JSON value | `STRING` | Convert to string when present |
-| — | `source` | — | `STRING` | Constant `google-sheets` |
+| — | `source` | — | `STRING` | Constant `salsa-pos-api` |
 | `amount` | `amount_minor` | Numeric or numeric string | `INTEGER` cents | Multiply by 100 and round |
 | `currency` | `currency` | `STRING` | `STRING` | Uppercase; default to `USD` when empty or absent |
 | `timestamp` | `transaction_ts` | String or number | ISO 8601 UTC `STRING` | Parse and normalize; omit if invalid |
@@ -202,7 +202,7 @@ services itself.
    `{ run_id, rows, transactions }`.
 
 The row mapping uses source `id` as a string `external_id` when present,
-`google-sheets` as `source`, source `amount` converted to rounded integer
+`salsa-pos-api` as `source`, source `amount` converted to rounded integer
 cents as `amount_minor`, and the uppercased source currency or `USD` as
 `currency`. A parseable source `timestamp` becomes ISO 8601 UTC
 `transaction_ts`; the original row is retained as `payload`. The extractor

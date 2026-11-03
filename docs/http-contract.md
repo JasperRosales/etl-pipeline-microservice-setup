@@ -59,7 +59,7 @@ Every non-2xx response has exactly this body:
 ```json
 {
   "external_id": "SHEET-ROW-1234",
-  "source": "google-sheets",
+  "source": "salsa-pos-api",
   "amount_minor": 1250,
   "currency": "USD",
   "transaction_ts": "2026-10-13T09:30:00Z",
@@ -146,27 +146,48 @@ upserts the `etl_runs` row for `run_id` (`status = 'completed'`, `rows_in`,
 
 | | |
 |---|---|
-| Request | `?date=YYYY-MM-DD` (required, local date) |
+| Request | `?date=YYYY-MM-DD` (required, local date) `&tz=+08:00` (optional UTC offset or `Z`; default: the reporter machine's offset) |
 | Response 200 | see below |
-| Response 400 | `invalid_request` — `date` missing or not `YYYY-MM-DD` |
+| Response 400 | `invalid_request` — `date` missing, not `YYYY-MM-DD` or not a real date, or `tz` malformed |
 | Response 503 | `not_ready` — database unavailable |
 | Response 500 | `internal_error` |
 | Failure modes | A day with no transactions is **not** an error: 200 with zero counts and one warning entry |
 
 ```json
 {
-  "date": "2026-10-13",
-  "generated_at": "2026-10-13T23:59:05Z",
+  "date": "2026-11-04",
+  "tz": "+08:00",
+  "range": { "start": "2026-11-03T16:00:00.000Z", "end": "2026-11-04T16:00:00.000Z" },
+  "generated_at": "2026-11-04T09:59:05.000Z",
   "transactions_count": 42,
-  "sales_total_minor": 123456,
-  "currency": "USD",
-  "data_quality": { "loaded_rows": 42, "total_rows": 45 },
+  "sales_total_minor": 1234500,
+  "currency": "PHP",
+  "data_quality": { "loaded_rows": 42, "total_rows": 42 },
+  "by_store":   [ { "store_id": "STORE-LIPA", "transactions_count": 20, "sales_total_minor": 640000 } ],
+  "by_payment": [ { "payment_method": "gcash", "transactions_count": 15, "sales_total_minor": 480000 } ],
+  "top_items":  [ { "sku": "SAL-001", "name": "Classic Salsa Roja 250g", "qty": 31, "sales_total_minor": 461900 } ],
   "warnings": []
 }
 ```
 
-`warnings` is a string array, e.g. `["no transactions for this date"]`.
-`data_quality` reports how many extracted rows survived to the database.
+The day is `[start, end)` in UTC for the local `date` at offset `tz`.
+`currency` is the most common currency that day (`null` on an empty day).
+`by_store`, `by_payment` and `top_items` (top 5 by quantity) come from each
+row's `payload_json`. `warnings` is a string array, e.g.
+`["no transactions for this date"]`, plus a warning when the day mixes currencies.
+
+### GET /report/activity — reporter
+
+| | |
+|---|---|
+| Request | `?limit=20` (optional, 1–100) |
+| Response 200 | `{ "generated_at", "loaded_transactions", "last_loaded_at", "runs": [etl_runs rows], "notifications": [notifications rows] }`, newest first |
+| Response 400 | `invalid_request` — `limit` out of range |
+| Response 503 | `not_ready` — database unavailable |
+
+The scheduler records a notification for every run, successful or failed,
+so `notifications` is the pipeline's run history. `runs` only holds runs
+that reached the loader.
 
 ### POST /notify — notifier
 

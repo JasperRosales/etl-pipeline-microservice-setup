@@ -293,6 +293,51 @@ goes to sleep when idle, so the first request can take up to about a minute.
 
 Initializes the database, starts all six services, and waits until every one answers `GET /health` before printing `Startup commands completed.`
 
+The scheduler runs the pipeline every **30 seconds** (`ETL_CRON=*/30 * * * * *`,
+6-field cron with seconds first). If a run is still going when the next tick
+fires, that tick is skipped and logged as `tick_skipped`. Use a 5-field
+expression such as `*/15 * * * *` for a slower schedule.
+
+### Add sales from your phone (POS UI)
+
+The POS page lives in a separate private repo, `salsa-pos-ui`. It runs a small
+server that keeps the API token in its own `.env` and forwards sales to
+salsa-pos-api. Publish it to your tailnet with `tailscale serve` and open it on
+your phone. See that repo's README for setup. The scheduler loads new sales on
+its next 30-second run.
+
+### Seed the database
+
+```powershell
+npm run db:init
+npm run db:seed              # load the 120 sales from salsa-pos-api\data\seed.json
+npm run db:seed -- --reset   # empty the tables first
+npm run db:seed -- --from-api  # take the rows from SHEETS_ENDPOINT instead
+```
+
+The seed sends every row through the same code as a pipeline run (extractor
+mapping, transformer checks, loader checks and insert). The rows therefore get
+the same types as real ones: `source` `salsa-pos-api`, `amount_minor` as whole
+centavos, `transaction_ts` in ISO 8601 UTC. It prints any rejected rows with
+their reason, and running it again only reports duplicates.
+
+If your database was loaded before `source` was renamed from `google-sheets`
+to `salsa-pos-api`, run `npm run db:seed -- --reset` once. Otherwise every sale
+is stored twice, once under each name.
+
+### Run the validator tests
+
+```powershell
+npm test
+```
+
+Runs the unit and HTTP tests in `test\` and `salsa-pos-api\test\` with
+`node --test`. They cover the transformer validators and dedupe hash, the
+extractor's row mapping, the config validator (ports, required values, cron),
+request validation on the extractor, transformer and loader, and the POS API's
+`POST /transactions` checks. You do not need the stack running: each test
+starts its own services on spare ports with a temporary database.
+
 ### Check service health
 
 ```powershell
