@@ -151,9 +151,9 @@ Google Sheets endpoint, maps them to raw transaction records, and creates the
 file and is called by the scheduler or directly with `POST /extract`.
 
 1. Copy `.env.example` to `.env` in the microservice project root.
-2. Keep `SHEETS_ENDPOINT=https://salsa-pos-api.onrender.com/transactions`,
-   which is already in `.env.example`. Set `API_TOKEN` to the salsa-pos-api
-   token from the project owner.
+2. Keep `SHEETS_ENDPOINT=https://salsa-pos-api.onrender.com/transactions` and
+   `API_TOKEN` exactly as they are in `.env.example`. That token is only for the
+   shared Render deployment of salsa-pos-api.
 3. Start the services with `.\start-etl.ps1` from the microservice project.
 4. Let the scheduler trigger the service or call `POST /extract` on port 3001.
 5. Review the response's `run_id`, `rows`, and `transactions`.

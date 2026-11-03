@@ -263,20 +263,25 @@ Open PowerShell in the project directory.
 
 ```powershell
 npm install
-Copy-Item .env.example .env    # then set API_TOKEN (see below)
+Copy-Item .env.example .env    # works as is with the shared Render API
 ```
 
-The extractor pulls sales from the shared **salsa-pos-api** on Render. `.env.example`
-already points at it, so leave this line as is:
+The extractor pulls sales from the shared **salsa-pos-api** on Render.
+`.env.example` already includes the URL and the API token, so leave these two
+lines as they are:
 
 ```
 SHEETS_ENDPOINT=https://salsa-pos-api.onrender.com/transactions
+API_TOKEN=<value already in .env.example>
 ```
 
-Set `API_TOKEN` to the salsa-pos-api token from the project owner. Without it,
-the API responds `401 unauthorized`. To check your settings before starting
-the services, open
-`https://salsa-pos-api.onrender.com/transactions?token=<your token>` in a browser.
+> **Note:** the `API_TOKEN` in `.env.example` is only for this shared Render
+> setup, which serves demo seed data. It is not a production secret. If you
+> deploy your own salsa-pos-api, generate a new token and keep it out of git.
+
+Without the token, the API responds `401 unauthorized`. To check your settings
+before starting the services, open
+`https://salsa-pos-api.onrender.com/transactions?token=<API_TOKEN>` in a browser.
 You should see the seeded transactions. The API is on Render's free plan and
 goes to sleep when idle, so the first request can take up to about a minute.
 
