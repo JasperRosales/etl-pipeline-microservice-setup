@@ -1,0 +1,17 @@
+{
+  "name": "salsa-pos-api",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Source POS API for the S.A.L.S.A. ETL pipeline extractor",
+  "main": "src/server.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "seed": "node scripts/generate-seed.js"
+  },
+  "dependencies": {
+    "express": "^5.1.0"
+  }
+}
