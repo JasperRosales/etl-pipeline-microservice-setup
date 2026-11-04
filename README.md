@@ -298,7 +298,7 @@ expression such as `*/15 * * * *` for a slower schedule.
 ```powershell
 npm run db:init
 npm run db:seed              # load every sale in CSV_PATH (data\transactions.csv: 120 sales)
-npm run db:seed -- --reset   # empty the tables first
+npm run db:reset             # empty the tables, then load the CSV again
 ```
 
 The seed sends every row through the same code as a pipeline run (extractor
@@ -308,7 +308,7 @@ centavos, `transaction_ts` in ISO 8601 UTC. It prints any rejected rows with
 their reason, and running it again only reports duplicates.
 
 If your database was loaded when `source` was still `salsa-pos-api` (or
-`google-sheets`), run `npm run db:seed -- --reset` once. `source` is part of
+`google-sheets`), run `npm run db:reset` once. `source` is part of
 the duplicate check, so otherwise every sale is stored twice, once under each
 name.
 

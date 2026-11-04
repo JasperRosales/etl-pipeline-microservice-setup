@@ -5,7 +5,7 @@
 "use strict";
 
 // Recorded on every row and part of the dedupe hash. Changing it makes
-// already-loaded rows look new, so reseed with `npm run db:seed -- --reset`.
+// already-loaded rows look new, so reseed with `npm run db:reset`.
 const SOURCE = "csv";
 
 function toIso(value) {

@@ -1,7 +1,7 @@
 // Seeds the ETL database with correctly typed transactions (no services needed).
 //
 //   npm run db:seed                 # load every row of CSV_PATH (default data/transactions.csv)
-//   npm run db:seed -- --reset      # empty transactions, etl_runs and notifications first
+//   npm run db:reset                # empty transactions, etl_runs and notifications first
 //
 // Every row goes through the same code as a real pipeline run:
 //   extractor CSV reading + mapping (services/extractor/csv.js, normalize.js)
