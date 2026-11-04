@@ -30,6 +30,14 @@ test("transformer rejects bad requests and validates records", async (t) => {
   assert.equal(r.data.rows_out, 1);
   assert.equal(r.data.rejected[0].reason, "invalid_amount");
 
+  r = await request("POST", `${svc.base}/transform`, { transactions: [], extra: true });
+  assert.equal(r.status, 400);
+  assert.match(r.data.error.message, /unknown field\(s\): extra/);
+
+  r = await request("POST", `${svc.base}/transform`, { transactions: new Array(5001).fill(null) });
+  assert.equal(r.status, 400);
+  assert.match(r.data.error.message, /at most 5000/);
+
   for (const body of ["[]", "\"text\"", "42", "null"]) {
     r = await request("POST", `${svc.base}/transform`, body);
     assert.equal(r.status, 400, body);
@@ -64,7 +72,17 @@ test("loader validates run_id, transactions, and dedupe_hash; inserts idempotent
   assert.equal(r.status, 400);
   assert.match(r.data.error.message, /transactions\[0\] is missing dedupe_hash/);
 
-  const tx = { external_id: "A", source: "s", amount_minor: 100, currency: "PHP", transaction_ts: "2026-10-01T00:00:00Z", dedupe_hash: "a".repeat(64) };
+  const { dedupeHash } = require("../services/transformer/validate");
+  const raw = { external_id: "A", source: "s", amount_minor: 100, currency: "PHP", transaction_ts: "2026-10-01T00:00:00Z" };
+  const tx = { ...raw, dedupe_hash: dedupeHash(raw) };
+
+  r = await request("POST", url, { run_id: "r1", transactions: [{ ...tx, dedupe_hash: "a".repeat(64) }] });
+  assert.equal(r.status, 400);
+  assert.match(r.data.error.message, /dedupe_hash does not match/);
+  r = await request("POST", url, { run_id: "bad id!", transactions: [tx] });
+  assert.equal(r.status, 400);
+  assert.match(r.data.error.message, /run_id must be 1-100/);
+
   r = await request("POST", url, { run_id: "r1", transactions: [tx] });
   assert.deepEqual(r.data, { inserted: 1, skipped_duplicates: 0 });
   r = await request("POST", url, { run_id: "r2", transactions: [tx] });
@@ -90,6 +108,10 @@ test("extractor rejects a bad since and maps CSV rows", async (t) => {
   r = await request("POST", `${svc.base}/extract`, { since: 12345 });
   assert.equal(r.status, 400);
 
+  r = await request("POST", `${svc.base}/extract`, { sinse: "2026-09-30T00:00:00Z" });
+  assert.equal(r.status, 400);
+  assert.match(r.data.error.message, /unknown field\(s\): sinse/);
+
   r = await request("POST", `${svc.base}/extract`, {});
   assert.equal(r.status, 200);
   assert.equal(r.data.rows, 2);
@@ -101,10 +123,18 @@ test("extractor rejects a bad since and maps CSV rows", async (t) => {
   assert.equal(r.data.transactions[0].amount_minor, 1250);
   assert.match(r.data.run_id, /^[0-9a-f-]{36}$/);
 
-  // Rows appended between runs are picked up on the next request.
-  fs.appendFileSync(csvPath, "X-2,2026-10-02T00:00:00Z,3.00,PHP\n");
+  // Rows appended between runs are picked up on the next request; a row with
+  // the wrong cell count is returned in `rejected` instead of being mapped.
+  fs.appendFileSync(csvPath, "X-2,2026-10-02T00:00:00Z,3.00,PHP\nX-3,2026-10-02T00:00:00Z,1,000.00,PHP\n");
   r = await request("POST", `${svc.base}/extract`, {});
   assert.equal(r.data.rows, 3);
+  assert.deepEqual(r.data.rejected, [{ row: 5, external_id: "X-3", reason: "wrong_field_count", detail: "5 cells, header has 4" }]);
+
+  // A header without a required column fails the whole extract.
+  fs.writeFileSync(csvPath, "id,amount\nX-1,1.00\n");
+  r = await request("POST", `${svc.base}/extract`, {});
+  assert.equal(r.status, 500);
+  assert.match(r.data.error.message, /missing required column\(s\): timestamp, currency/);
 });
 
 test("extractor answers 500 when the CSV file is missing", async (t) => {

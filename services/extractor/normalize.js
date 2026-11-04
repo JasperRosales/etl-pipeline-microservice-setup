@@ -1,4 +1,4 @@
-// Maps a source POS row { id, amount, currency, timestamp, ... } to the raw
+// Maps a CSV row { id, amount, currency, timestamp, ... } to the raw
 // Transaction shape. Unit-tested in test/extractor.test.js. Bad rows are passed
 // through with undefined/NaN fields so the transformer can reject them.
 
@@ -6,7 +6,7 @@
 
 // Recorded on every row and part of the dedupe hash. Changing it makes
 // already-loaded rows look new, so reseed with `npm run db:seed -- --reset`.
-const SOURCE = "salsa-pos-api";
+const SOURCE = "csv";
 
 function toIso(value) {
   if (typeof value !== "string" && typeof value !== "number") return undefined;

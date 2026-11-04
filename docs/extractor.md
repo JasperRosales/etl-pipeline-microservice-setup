@@ -13,7 +13,7 @@
 - **Extraction Method:** The Node.js extractor service exposes `POST /extract` on port 3001. On each request it reads the whole CSV file, optionally keeps only rows at or after a normalized `since` value, and maps each row.
 - **Schedule and Invocation:** The extractor does not schedule itself. It is called by the scheduler service according to `ETL_CRON` (default: every 30 seconds, `*/30 * * * * *`), or can be called directly.
 - **Extraction Scope:** Every row in the CSV file. An optional `since` request value keeps rows whose `timestamp` is at or after it (rows with an unparseable timestamp are kept so the transformer can reject them); no default date window is applied when it is omitted.
-- **Source Limitations and Assumptions:** The CSV file must exist, be readable as UTF-8, and have an `id` column in its header. The file is re-read on every run, so rows appended between runs are picked up on the next run; rows already loaded are skipped by the loader's dedupe hash.
+- **Source Limitations and Assumptions:** The CSV file must exist, be readable as UTF-8, stay within 1.5 MB and 5,000 data rows, and have `id`, `timestamp`, `amount` and `currency` columns in its header. The file is re-read on every run, so rows appended between runs are picked up on the next run; rows already loaded are skipped by the loader's dedupe hash.
 
 ---
 
@@ -48,13 +48,13 @@ The extractor maps each source row into the raw transaction shape used by the ne
 | Column | Data Type | Key / Relationship |
 |---|---|---|
 | `external_id` | `STRING` or omitted | Source `id` converted to a string; downstream validation requires a usable identifier. |
-| `source` | `STRING` | Constant value `salsa-pos-api`, kept from the API era so rows loaded before the CSV switch keep the same dedupe hash. |
+| `source` | `STRING` | Constant value `csv`. Part of the dedupe hash. |
 | `amount_minor` | `INTEGER` or invalid numeric value | Source `amount` multiplied by 100 and rounded; validated by the transformer. |
 | `currency` | `STRING` | Uppercased source currency or default `USD`. |
 | `transaction_ts` | ISO 8601 UTC `STRING` or omitted | Normalized from source `timestamp` when parseable; validated by the transformer. |
 | `payload` | `OBJECT` | Original source row preserved for traceability. |
 
-**Output:** `{ "run_id": "...", "rows": 0, "transactions": [] }`. `rows` equals the number of mapped transactions returned. Raw transactions are passed to the transformer for validation and cleanup.
+**Output:** `{ "run_id": "...", "rows": 0, "transactions": [], "rejected": [] }`. `rows` equals the number of mapped transactions returned. Raw transactions are passed to the transformer for validation and cleanup.
 
 ---
 
@@ -63,8 +63,10 @@ The extractor maps each source row into the raw transaction shape used by the ne
 | Check Name | Target | Purpose | Validation Criteria |
 |---|---|---|---|
 | Optional `since` validation | `POST /extract` request body | Prevents an invalid date filter. | If provided, `since` must be a string accepted by JavaScript's date parser; it is normalized to ISO 8601 UTC. |
-| CSV file validation | File at `CSV_PATH` | Ensures the file can be read as transaction rows. | The file must exist and be readable, must not end inside an unterminated quoted field, and its header must include `id`. |
-| Row-level data validation | Individual source rows | Keeps extraction separate from transaction validation. | The extractor maps rows but does not reject malformed records or check duplicates; the transformer performs row validation and in-batch deduplication. |
+| Request field validation | `POST /extract` request body | Catches typos such as `sinse`. | Only `since` is accepted; any other field is a 400. |
+| CSV file validation | File at `CSV_PATH` | Ensures the file can be read as transaction rows. | The file must exist, be a regular file of at most 1.5 MB, be valid UTF-8, have at most 5,000 data rows, and not end inside an unterminated quoted field. Its header must include `id`, `timestamp`, `amount` and `currency`, with no blank or repeated names. Any failure fails the whole extract (HTTP 500). |
+| Row shape validation | Individual CSV rows | A row with more or fewer cells than the header (usually an unquoted comma such as `1,250.00`) would put values in the wrong columns. | The row is not mapped; it is returned in `rejected` as `{ row, external_id, reason: "wrong_field_count", detail }` and logged as `extract_rejected`. |
+| Row value validation | Mapped transactions | Keeps extraction separate from transaction validation. | Bad values (amount, currency, timestamp, items, discount, totals) are passed through; the transformer rejects them with a reason code. |
 
 ---
 
@@ -101,7 +103,7 @@ The extractor does not report source rows read, rejected-row counts, validation 
 | Source Column | Standardized Column | Source Type | Target Type | Mapping Type |
 |---|---|---|---|---|
 | `id` | `external_id` | CSV text | `STRING` | Convert to string when present |
-| — | `source` | — | `STRING` | Constant `salsa-pos-api` |
+| — | `source` | — | `STRING` | Constant `csv` |
 | `amount` | `amount_minor` | Numeric text | `INTEGER` cents | Multiply by 100 and round |
 | `currency` | `currency` | CSV text | `STRING` | Uppercase; default to `USD` when empty or absent |
 | `timestamp` | `transaction_ts` | Date text | ISO 8601 UTC `STRING` | Parse and normalize; omit if invalid |
@@ -121,7 +123,8 @@ The extractor does not report source rows read, rejected-row counts, validation 
 ### Validation Summary
 
 - Optional `since` request validation: **PASS** when omitted or valid; otherwise the request is rejected.
-- CSV file validation: **PASS** when the file exists, parses, and has an `id` column; otherwise extraction fails.
+- CSV file validation: **PASS** when the file exists, is within the size and row limits, parses as UTF-8, and has the required columns; otherwise extraction fails.
+- Row shape validation: rows with the wrong cell count are returned in `rejected`; the rest continue.
 - Individual row validation and in-batch duplicate checking: **DEFERRED TO THE TRANSFORMER**.
 
 **Handover:** The scheduler sends the returned transactions to the transformer and carries the same `run_id` through to the loader. The extractor does not write to the database or invoke downstream services itself.
@@ -139,7 +142,7 @@ The extractor does not report source rows read, rejected-row counts, validation 
 
 ### Problem 2: Malformed CSV File
 
-- **Problem Description:** The file has an unterminated quoted field or no `id` column in its header.
+- **Problem Description:** The file has an unterminated quoted field, is not UTF-8, is over the size or row limit, or its header is missing a required column or repeats one.
 - **Possible Cause:** Hand-edited file, a spreadsheet export with different headers, or a partially written file.
 - **Impact on Extraction Process:** The extractor cannot map the file into raw transaction records.
 - **Proposed Solution / Mitigation:** Fail the request with the parse error and log it for investigation. Individual bad cells (such as a non-numeric amount) do not fail the file; the transformer rejects those rows.
@@ -199,14 +202,14 @@ write to SQLite or call the other ETL services itself.
 2. The service validates `since` if present and normalizes it to UTC.
 3. It creates a UUID v4 `run_id`.
 4. It reads and parses the CSV file at `CSV_PATH`. A missing file, an
-   unterminated quoted field, or a header without `id` fails the request
+   unterminated quoted field, a bad header, or a file over the limits fails the request
    with HTTP 500.
 5. When `since` is present it keeps rows whose `timestamp` is at or after it.
 6. It maps each source row into the raw transaction shape and responds with
    `{ run_id, rows, transactions }`.
 
 The row mapping uses source `id` as a string `external_id` when present,
-`salsa-pos-api` as `source`, source `amount` converted to rounded integer
+`csv` as `source`, source `amount` converted to rounded integer
 cents as `amount_minor`, and the uppercased source currency or `USD` as
 `currency`. A parseable source `timestamp` becomes ISO 8601 UTC
 `transaction_ts`; the original row is retained as `payload`. The extractor

@@ -7,11 +7,13 @@ const assert = require("node:assert/strict");
 const path = require("path");
 const { spawnSync } = require("child_process");
 const Database = require("better-sqlite3");
+const { readCsvRows } = require("../services/extractor/csv");
 const { projectRoot, tempDir, isolatedEnv, runNode, request, startService } = require("./helpers");
 
 function freshDb() {
   const dbPath = path.join(tempDir("etl-test-db-"), "pos.db");
-  const env = isolatedEnv({ DB_PATH: dbPath, LOG_DIR: tempDir("etl-test-logs-") });
+  // The seed reads the real demo CSV; nothing writes to it.
+  const env = isolatedEnv({ DB_PATH: dbPath, LOG_DIR: tempDir("etl-test-logs-"), CSV_PATH: path.join(projectRoot, "data", "transactions.csv") });
   const init = runNode(`require("./scripts/init-db.js")`, env);
   assert.equal(init.status, 0, init.stderr);
   return { dbPath, env };
@@ -33,6 +35,9 @@ test("notifier validates channel, subject and body", async (t) => {
     [{ channel: "log", subject: "x".repeat(201), body: "b" }, /subject must be at most 200/],
     [{ channel: "log", subject: "s", body: "x".repeat(10_001) }, /body must be at most 10000/],
     [[{ channel: "log", subject: "s", body: "b" }], /request body must be a JSON object/],
+    [{ channel: "log", subject: "s", body: "b", to: "x" }, /unknown field\(s\): to/],
+    [{ channel: "log", subject: "two\nlines", body: "b" }, /subject must be a single line/],
+    [{ channel: "log", subject: "s", body: "bell\u0007" }, /body must not contain control characters/],
   ];
   for (const [body, pattern] of bad) {
     const r = await request("POST", url, body);
@@ -43,11 +48,13 @@ test("notifier validates channel, subject and body", async (t) => {
   let r = await request("POST", url, { channel: "log", subject: "ETL run completed", body: "ok" });
   assert.equal(r.status, 200);
   assert.equal(r.data.delivered, true);
+  r = await request("POST", url, { channel: "log", subject: "multi-line body is fine", body: "a\n\tb\r\nc" });
+  assert.equal(r.status, 200);
   r = await request("POST", url, { channel: "email", subject: "x", body: "" });
   assert.equal(r.data.delivered, false); // stub channel: recorded, not delivered
 
   const db = new Database(dbPath, { readonly: true });
-  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM notifications").get().n, 2);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM notifications").get().n, 3);
   db.close();
 });
 
@@ -57,7 +64,7 @@ function seed(env, ...args) {
 
 test("seed script loads correctly typed rows, is idempotent, and --reset empties first", () => {
   const { dbPath, env } = freshDb();
-  const seedRows = require("../salsa-pos-api/data/seed.json");
+  const { rows: seedRows } = readCsvRows(path.join(projectRoot, "data", "transactions.csv"));
 
   let r = seed(env);
   assert.equal(r.status, 0, r.stderr);
@@ -70,7 +77,7 @@ test("seed script loads correctly typed rows, is idempotent, and --reset empties
                      typeof(transaction_ts) AS ts, typeof(dedupe_hash) AS hash, json_valid(payload_json) AS payload_ok
               FROM transactions`)
     .all();
-  assert.deepEqual(types, [{ id: "text", source: "salsa-pos-api", amount: "integer", currency: "PHP", ts: "text", hash: "text", payload_ok: 1 }]);
+  assert.deepEqual(types, [{ id: "text", source: "csv", amount: "integer", currency: "PHP", ts: "text", hash: "text", payload_ok: 1 }]);
   const bad = db.prepare(`SELECT COUNT(*) AS n FROM transactions
                           WHERE transaction_ts NOT GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'
                              OR length(dedupe_hash) != 64`).get().n;
@@ -96,7 +103,10 @@ test("seed script loads correctly typed rows, is idempotent, and --reset empties
 
 test("seed script rejects unknown options and a missing database", () => {
   const { env } = freshDb();
-  let r = seed(env, "--nope");
+  let r = seed(env, "--from-api");
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /unknown option --from-api/);
+  r = seed(env, "--nope");
   assert.equal(r.status, 1);
   assert.match(r.stderr, /unknown option --nope/);
 

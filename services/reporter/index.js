@@ -58,7 +58,19 @@ start("reporter", (app, ctx) => {
     }
   }
 
+  // Rejects unknown or repeated query parameters (?date=a&date=b arrives as an
+  // array) so a typo is a 400 instead of a silently different report.
+  function queryProblem(query, allowed) {
+    for (const [key, value] of Object.entries(query)) {
+      if (!allowed.includes(key)) return `unknown query parameter "${key}" (allowed: ${allowed.join(", ")})`;
+      if (typeof value !== "string") return `query parameter "${key}" must be given once`;
+    }
+    return null;
+  }
+
   app.get("/report/daily", (req, res) => {
+    const problem = queryProblem(req.query, ["date", "tz"]);
+    if (problem) return sendError(res, 400, "invalid_request", problem);
     const date = req.query.date;
     const range = dayRange(date, req.query.tz);
     if (range.error) return sendError(res, 400, "invalid_request", range.error);
@@ -96,7 +108,10 @@ start("reporter", (app, ctx) => {
   });
 
   app.get("/report/activity", (req, res) => {
-    const raw = req.query.limit === undefined ? 20 : Number(req.query.limit);
+    const problem = queryProblem(req.query, ["limit"]);
+    if (problem) return sendError(res, 400, "invalid_request", problem);
+    // Digits only: Number() would also accept "0x10", "1e1" and " 5".
+    const raw = req.query.limit === undefined ? 20 : /^\d{1,3}$/.test(req.query.limit) ? Number(req.query.limit) : NaN;
     if (!Number.isInteger(raw) || raw < 1 || raw > 100) {
       return sendError(res, 400, "invalid_request", "limit must be an integer between 1 and 100");
     }

@@ -5,7 +5,11 @@
 
 "use strict";
 
-const { rejectionReason } = require("../transformer/validate");
+const { dedupeHash, rejectionReason } = require("../transformer/validate");
+
+// UUIDs from the extractor, plus the seed-/smoke- prefixed ids the scripts use.
+const RUN_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/;
+const TX_FIELDS = new Set(["external_id", "source", "amount_minor", "currency", "transaction_ts", "payload", "dedupe_hash"]);
 
 const INSERT_TX = `
 INSERT OR IGNORE INTO transactions
@@ -25,20 +29,40 @@ ON CONFLICT(run_id) DO UPDATE SET
 `;
 
 // Returns null when the load request is valid, otherwise a message naming the
-// first problem. Every column the loader writes is type-checked here so a bad
-// row is a 400, never a SQLite constraint error (500) or a wrongly typed row.
-function loadRequestProblem(body) {
-  if (!body || typeof body !== "object") return "body must be a JSON object";
+// first problem. Every column the loader writes is checked here, with the
+// transformer's own rules, so a bad row is a 400, never a SQLite constraint
+// error (500) or a wrongly typed row. The batch is all-or-nothing: the loader
+// only receives rows the transformer already accepted, so any failure here
+// means a broken client, not bad source data.
+//   - run_id: 1-100 chars of letters, digits, "-" or "_"
+//   - only the documented fields: external_id, source, amount_minor, currency,
+//     transaction_ts, payload, dedupe_hash
+//   - dedupe_hash must equal the hash recomputed from the row (catches rows
+//     edited after the transformer, or hashes made up by the caller)
+//   - no dedupe_hash twice in one batch
+function loadRequestProblem(body, now = Date.now()) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return "body must be a JSON object";
   if (typeof body.run_id !== "string" || body.run_id.trim() === "") return "run_id must be a non-empty string";
+  if (!RUN_ID.test(body.run_id)) return "run_id must be 1-100 letters, digits, '-' or '_'";
   if (!Array.isArray(body.transactions)) return "transactions must be an array";
+  const extra = Object.keys(body).filter((k) => k !== "run_id" && k !== "transactions");
+  if (extra.length) return `unknown field(s): ${extra.join(", ")}`;
+
+  const seen = new Set();
   for (const [i, tx] of body.transactions.entries()) {
     if (!tx || typeof tx !== "object" || typeof tx.dedupe_hash !== "string") {
       return `transactions[${i}] is missing dedupe_hash - send transformed transactions`;
     }
     if (!/^[0-9a-f]{64}$/.test(tx.dedupe_hash)) return `transactions[${i}].dedupe_hash must be a 64-character hex SHA-256`;
-    if (typeof tx.source !== "string" || tx.source.trim() === "") return `transactions[${i}].source must be a non-empty string`;
-    const reason = rejectionReason(tx);
+    const unknown = Object.keys(tx).filter((k) => !TX_FIELDS.has(k));
+    if (unknown.length) return `transactions[${i}] has unknown field(s): ${unknown.join(", ")}`;
+    const reason = rejectionReason(tx, now);
     if (reason) return `transactions[${i}] failed validation: ${reason}`;
+    if (tx.dedupe_hash !== dedupeHash(tx)) {
+      return `transactions[${i}].dedupe_hash does not match its fields - send rows exactly as the transformer returned them`;
+    }
+    if (seen.has(tx.dedupe_hash)) return `transactions[${i}] repeats the dedupe_hash of an earlier row in this batch`;
+    seen.add(tx.dedupe_hash);
   }
   return null;
 }

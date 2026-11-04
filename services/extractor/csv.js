@@ -11,13 +11,27 @@
 //   the type conversion), and empty cells are left out of the row object so a
 //   blank amount is rejected downstream instead of becoming 0.
 // - The `items` column holds a JSON array of line items. A cell that is not
-//   valid JSON is kept as the raw string; the reporter just ignores it.
+//   valid JSON is kept as the raw string, which the transformer rejects.
 // - Each row gets `row`: its position in the sheet with the header as row 1,
 //   unless the file has its own `row` column.
+//
+// File-level checks (any failure fails the whole extract):
+//   - the header has every REQUIRED_COLUMNS entry, no blank names, no duplicates
+//   - the file is not over MAX_FILE_BYTES and has at most MAX_ROWS data rows
+//     (the extract response has to fit the 5 MB request limit downstream)
+//   - no unterminated quoted field
+// Row-level check: a row whose cell count differs from the header's (usually
+// an unquoted comma shifting every later column) is not mapped, because its
+// values would land in the wrong fields. It is returned in `rejected` as
+// { row, external_id, reason: "wrong_field_count" } instead.
 
 "use strict";
 
 const fs = require("fs");
+
+const REQUIRED_COLUMNS = ["id", "timestamp", "amount", "currency"];
+const MAX_ROWS = 5_000;
+const MAX_FILE_BYTES = 1.5 * 1024 * 1024;
 
 // Splits CSV text into an array of records (arrays of strings).
 function parseCsv(text) {
@@ -69,42 +83,79 @@ function parseCsv(text) {
   return records.filter((r) => !(r.length === 1 && r[0].trim() === ""));
 }
 
-// Turns CSV text into source row objects keyed by the header.
+function headerProblem(names) {
+  if (names.some((n) => n === "")) return "CSV header has a blank column name";
+  const dup = names.find((n, i) => names.indexOf(n) !== i);
+  if (dup) return `CSV header repeats the column "${dup}"`;
+  const missing = REQUIRED_COLUMNS.filter((c) => !names.includes(c));
+  if (missing.length) return `CSV header is missing required column(s): ${missing.join(", ")} (got: ${names.join(", ")})`;
+  return null;
+}
+
+// Turns CSV text into { rows, rejected }: source row objects keyed by the
+// header, plus rows that could not be mapped.
 function csvToRows(text) {
   const [header, ...records] = parseCsv(text);
-  if (!header) return [];
+  if (!header) return { rows: [], rejected: [] };
   const names = header.map((h) => h.trim());
-  if (!names.includes("id")) {
-    throw new Error(`CSV header must include an "id" column (got: ${names.join(", ")})`);
+  const problem = headerProblem(names);
+  if (problem) throw new Error(problem);
+  if (records.length > MAX_ROWS) {
+    throw new Error(`CSV has ${records.length} data rows; the limit is ${MAX_ROWS}. Archive older rows to a separate file.`);
   }
 
-  return records.map((values, index) => {
+  const rows = [];
+  const rejected = [];
+  records.forEach((values, index) => {
+    const position = index + 2;
+    if (values.length !== names.length) {
+      const id = values[names.indexOf("id")];
+      rejected.push({
+        row: position,
+        external_id: id && id.trim() ? id.trim() : null,
+        reason: "wrong_field_count",
+        detail: `${values.length} cells, header has ${names.length}`,
+      });
+      return;
+    }
     const row = {};
     names.forEach((name, col) => {
       const value = values[col];
-      if (name === "" || value === undefined || value.trim() === "") return;
+      if (value.trim() === "") return;
       row[name] = value.trim();
     });
     if (typeof row.items === "string") {
       try {
         row.items = JSON.parse(row.items);
       } catch {
-        /* keep the raw string */
+        /* keep the raw string; the transformer rejects it as invalid_items */
       }
     }
-    if (row.row === undefined) row.row = index + 2;
+    if (row.row === undefined) row.row = position;
     else if (/^\d+$/.test(row.row)) row.row = Number(row.row);
-    return row;
+    rows.push(row);
   });
+  return { rows, rejected };
 }
 
 function readCsvRows(file) {
+  let stat;
+  try {
+    stat = fs.statSync(file);
+  } catch (err) {
+    throw new Error(err.code === "ENOENT" ? `CSV file not found: ${file}` : `cannot read CSV file ${file}: ${err.message}`);
+  }
+  if (!stat.isFile()) throw new Error(`CSV path is not a file: ${file}`);
+  if (stat.size > MAX_FILE_BYTES) {
+    throw new Error(`CSV file is ${stat.size} bytes; the limit is ${MAX_FILE_BYTES}. Archive older rows to a separate file.`);
+  }
   let text;
   try {
     text = fs.readFileSync(file, "utf8");
   } catch (err) {
-    throw new Error(err.code === "ENOENT" ? `CSV file not found: ${file}` : `cannot read CSV file ${file}: ${err.message}`);
+    throw new Error(`cannot read CSV file ${file}: ${err.message}`);
   }
+  if (text.includes("\uFFFD")) throw new Error(`CSV file ${file} is not valid UTF-8; save it as "CSV UTF-8"`);
   return csvToRows(text);
 }
 
@@ -119,4 +170,4 @@ function filterSince(rows, since) {
   });
 }
 
-module.exports = { parseCsv, csvToRows, readCsvRows, filterSince };
+module.exports = { REQUIRED_COLUMNS, MAX_ROWS, MAX_FILE_BYTES, parseCsv, csvToRows, readCsvRows, filterSince };

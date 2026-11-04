@@ -86,7 +86,19 @@ test("/report/daily and /report/activity read the pipeline's output", async (t) 
   assert.equal(r.data.runs[0].run_id, "r1");
   assert.deepEqual(r.data.notifications.map((n) => n.subject), ["ETL run failed", "ETL run completed"]);
 
-  for (const limit of ["0", "101", "abc"]) {
+  for (const limit of ["0", "101", "abc", "0x10", "1e1", "%205", "5.0"]) {
     assert.equal((await request("GET", `${svc.base}/report/activity?limit=${limit}`)).status, 400, limit);
+  }
+
+  // Unknown or repeated query parameters are rejected, not ignored.
+  for (const [query, pattern] of [
+    ["/report/daily?date=2026-11-04&timezone=Z", /unknown query parameter "timezone"/],
+    ["/report/daily?date=2026-11-04&date=2026-11-05", /"date" must be given once/],
+    ["/report/activity?limit=5&limit=6", /"limit" must be given once/],
+    ["/report/activity?lmit=5", /unknown query parameter "lmit"/],
+  ]) {
+    r = await request("GET", `${svc.base}${query}`);
+    assert.equal(r.status, 400, query);
+    assert.match(r.data.error.message, pattern);
   }
 });

@@ -13,7 +13,7 @@
     "smoke": "node scripts/smoke-test.js",
     "etl:start": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\start-etl.ps1",
     "etl:stop": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\stop-etl.ps1",
-    "test": "node --test \"test/*.test.js\" \"salsa-pos-api/test/*.test.js\""
+    "test": "node --test \"test/*.test.js\""
   },
   "dependencies": {
     "better-sqlite3": "^12.4.1",

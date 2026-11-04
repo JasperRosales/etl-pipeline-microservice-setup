@@ -23,6 +23,11 @@ The transformer does not profile a source dataset ahead of processing, calculate
 | Extractor transaction array | `amount_minor` | Missing or non-integer value | A numeric string or decimal value | Not profiled in advance; counted per request in `rejected` | Reject as `invalid_amount` (Rule C-02). |
 | Extractor transaction array | `currency` | Invalid format | Lowercase or not exactly three uppercase letters | Not profiled in advance; counted per request in `rejected` | Reject as `invalid_currency` (Rule C-03). |
 | Extractor transaction array | `transaction_ts` | Missing or unparseable timestamp | Missing value or string for which `Date.parse` returns `NaN` | Not profiled in advance; counted per request in `rejected` | Reject as `invalid_timestamp` (Rule C-04). |
+| Extractor transaction array | `external_id` | Malformed identifier | Over 100 characters, surrounding whitespace, or control characters | Not profiled in advance; counted per request in `rejected` | Reject as `invalid_external_id` (Rule C-06). |
+| Extractor transaction array | `source` | Missing or oversized source | Not a non-empty string of at most 50 characters | Not profiled in advance; counted per request in `rejected` | Reject as `invalid_source` (Rule C-07). |
+| Extractor transaction array | `transaction_ts` | Timestamp in the future | More than one hour after the transformer's clock | Not profiled in advance; counted per request in `rejected` | Reject as `future_timestamp` (Rule C-08). |
+| Extractor transaction array | `payload`, `payload.items`, `payload.discount` | Malformed sale details | Payload not an object; empty or malformed line items; negative or over-precise discount | Not profiled in advance; counted per request in `rejected` | Reject as `invalid_payload`, `invalid_items` or `invalid_discount` (Rules C-09 to C-11). |
+| Extractor transaction array | `amount_minor` vs `payload.items` | Total does not add up | `amount_minor` ≠ Σ(`qty` × `unit_price`) − `discount` | Not profiled in advance; counted per request in `rejected` | Reject as `amount_mismatch` (Rule C-12). |
 | Extractor transaction array | Canonical transaction fields | In-batch duplicate | Repeated SHA-256 hash over canonical values | Not profiled in advance; counted per request in `rejected` | Reject later matching row as `duplicate_in_batch` (Rule C-05). |
 
 ---
@@ -33,11 +38,22 @@ The implementation rejects invalid records; it does not repair values or silentl
 
 | Rule ID | Target | Condition | Action | Justification |
 |---|---|---|---|---|
-| C-01 | `transactions[].external_id` | Not a string, missing, `null`, or equal to the empty string | Reject as `missing_external_id` | The transformer requires a usable string identifier. Whitespace-only strings are not trimmed and therefore pass this check. |
-| C-02 | `transactions[].amount_minor` | Value does not satisfy `Number.isInteger` | Reject as `invalid_amount` | The pipeline contract represents money as integer minor units. Negative integers are not separately rejected by the implementation. |
+| C-01 | `transactions[].external_id` | Not a string, missing, `null`, or equal to the empty string | Reject as `missing_external_id` | The transformer requires a usable string identifier. Whitespace-only or padded identifiers are caught by C-06. |
+| C-02 | `transactions[].amount_minor` | Not a safe integer, or beyond ±100,000,000 (1,000,000.00) | Reject as `invalid_amount` | The pipeline contract represents money as integer minor units; the cap catches misplaced decimals. Negative amounts (refunds) are allowed. |
 | C-03 | `transactions[].currency` | Not a string matching `^[A-Z]{3}$` | Reject as `invalid_currency` | Ensures the currency code has three uppercase ASCII letters. The transformer does not uppercase or otherwise normalize the input. |
-| C-04 | `transactions[].transaction_ts` | Not a string or JavaScript `Date.parse` returns `NaN` | Reject as `invalid_timestamp` | Requires a parseable timestamp; strict ISO 8601 format is not enforced. |
+| C-04 | `transactions[].transaction_ts` | Not `YYYY-MM-DDTHH:MM:SS[.sss]Z`, not a real instant (e.g. `2026-02-30`), or before 2000-01-01 | Reject as `invalid_timestamp` | Requires canonical ISO 8601 UTC so stored timestamps compare and group consistently. |
 | C-05 | Canonical transaction values | A valid row produces a hash already seen in the current request | Reject the later row as `duplicate_in_batch` | Prevents identical canonical values from appearing more than once in an accepted batch. |
+| C-06 | `transactions[].external_id` | Over 100 characters, leading/trailing whitespace, or control characters | Reject as `invalid_external_id` | Whitespace variants of the same id would otherwise dedupe as different sales. |
+| C-07 | `transactions[].source` | Not a non-empty string of at most 50 characters | Reject as `invalid_source` | `source` is part of the dedupe hash and a stored column. |
+| C-08 | `transactions[].transaction_ts` | More than one hour after the transformer's clock | Reject as `future_timestamp` | A future sale is a clock or data-entry error; one hour allows for clock skew. |
+| C-09 | `transactions[].payload` | Present but not a JSON object | Reject as `invalid_payload` | The reporter reads store, payment and items from the payload object. |
+| C-10 | `payload.items` | Present but not a non-empty array of `{ sku or name, qty: positive integer, unit_price: ≥ 0, at most 2 decimals }` | Reject as `invalid_items` | The reporter's top-items breakdown needs well-formed line items. |
+| C-11 | `payload.discount` | Present but negative, non-numeric, or more than 2 decimals | Reject as `invalid_discount` | Needed for the total check in C-12. |
+| C-12 | `amount_minor` with `payload.items` | `amount_minor` ≠ Σ(`qty` × `unit_price`) − `discount`, all in minor units | Reject as `amount_mismatch` | The sale total must agree with its line items. Rows without `items` skip this check. |
+
+Rules run in this order: C-01, C-06, C-07, C-02, C-03, C-04, C-08, C-09, C-11, C-10, C-12, then C-05. Only the first failing rule is reported.
+
+The request itself is rejected with HTTP 400 when `transactions` is not an array, has more than 5,000 entries, or the body has any other top-level field.
 
 ---
 
@@ -94,7 +110,7 @@ Other input fields, including `payload`, are not validated or changed on accepte
 | `transactions` | Array | Accepted records with all original fields preserved and `dedupe_hash` added or replaced by the computed hash. |
 | `rejected` | Array | Rejection summaries with zero-based `index`, string `external_id` when available (otherwise `null`), and `reason`. |
 
-The response invariant is `rows_in = rows_out + rejected.length`. Reason codes are `missing_external_id`, `invalid_amount`, `invalid_currency`, `invalid_timestamp`, and `duplicate_in_batch`. The transformer does not specify target database nullability or keys; the loader owns persistence.
+The response invariant is `rows_in = rows_out + rejected.length`. Reason codes are `missing_external_id`, `invalid_external_id`, `invalid_source`, `invalid_amount`, `invalid_currency`, `invalid_timestamp`, `future_timestamp`, `invalid_payload`, `invalid_items`, `invalid_discount`, `amount_mismatch`, and `duplicate_in_batch`. The transformer does not specify target database nullability or keys; the loader owns persistence.
 
 ---
 
@@ -218,13 +234,12 @@ the loader.
    `transactions` array.
 2. If `transactions` is missing or not an array, the service returns 400
    `invalid_request`.
-3. For each transaction, it checks for a non-empty string `external_id`, an
-   integer `amount_minor`, a three-letter uppercase `currency`, and a
-   parseable string `transaction_ts`.
+3. For each transaction, it applies rules C-01 to C-12 (section 3): the
+   identifier, source, amount, currency, timestamp, payload, line items,
+   discount, and that the amount equals the line items minus the discount.
 4. Invalid rows are added to `rejected` with their zero-based input `index`,
-   their string `external_id` when available (otherwise `null`), and a reason:
-   `missing_external_id`, `invalid_amount`, `invalid_currency`, or
-   `invalid_timestamp`.
+   their string `external_id` when available (otherwise `null`), and the
+   first failing reason code.
 5. For each valid row, it computes a hexadecimal SHA-256 `dedupe_hash` over
    `source`, `external_id`, `amount_minor`, `currency`, and `transaction_ts`
    joined with `|`.
