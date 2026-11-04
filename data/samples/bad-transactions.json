@@ -1,0 +1,120 @@
+{
+  "description": "Sample raw transactions for testing the transformer and loader with wrong data. Each case names the reason the transformer should reject it with (expect), or null when the row is valid. Run: npm run pipeline:bad",
+  "cases": [
+    {
+      "case": "external_id is empty",
+      "expect": "missing_external_id",
+      "transaction": { "external_id": "", "source": "csv", "amount_minor": 15900, "currency": "PHP", "transaction_ts": "2026-01-15T02:00:00.000Z" }
+    },
+    {
+      "case": "external_id is missing",
+      "expect": "missing_external_id",
+      "transaction": { "source": "csv", "amount_minor": 15900, "currency": "PHP", "transaction_ts": "2026-01-15T02:00:00.000Z" }
+    },
+    {
+      "case": "external_id has spaces around it",
+      "expect": "invalid_external_id",
+      "transaction": { "external_id": " SAMPLE-BAD-003 ", "source": "csv", "amount_minor": 15900, "currency": "PHP", "transaction_ts": "2026-01-15T02:00:00.000Z" }
+    },
+    {
+      "case": "external_id contains a tab (control character)",
+      "expect": "invalid_external_id",
+      "transaction": { "external_id": "SAMPLE-BAD\t004", "source": "csv", "amount_minor": 15900, "currency": "PHP", "transaction_ts": "2026-01-15T02:00:00.000Z" }
+    },
+    {
+      "case": "source is empty",
+      "expect": "invalid_source",
+      "transaction": { "external_id": "SAMPLE-BAD-005", "source": "", "amount_minor": 15900, "currency": "PHP", "transaction_ts": "2026-01-15T02:00:00.000Z" }
+    },
+    {
+      "case": "amount is a text string, not minor units",
+      "expect": "invalid_amount",
+      "transaction": { "external_id": "SAMPLE-BAD-006", "source": "csv", "amount_minor": "159.00", "currency": "PHP", "transaction_ts": "2026-01-15T02:00:00.000Z" }
+    },
+    {
+      "case": "amount has decimals (must be a whole number of centavos)",
+      "expect": "invalid_amount",
+      "transaction": { "external_id": "SAMPLE-BAD-007", "source": "csv", "amount_minor": 159.5, "currency": "PHP", "transaction_ts": "2026-01-15T02:00:00.000Z" }
+    },
+    {
+      "case": "amount is over 1,000,000.00",
+      "expect": "invalid_amount",
+      "transaction": { "external_id": "SAMPLE-BAD-008", "source": "csv", "amount_minor": 200000000, "currency": "PHP", "transaction_ts": "2026-01-15T02:00:00.000Z" }
+    },
+    {
+      "case": "currency is lowercase",
+      "expect": "invalid_currency",
+      "transaction": { "external_id": "SAMPLE-BAD-009", "source": "csv", "amount_minor": 15900, "currency": "php", "transaction_ts": "2026-01-15T02:00:00.000Z" }
+    },
+    {
+      "case": "currency is not 3 letters",
+      "expect": "invalid_currency",
+      "transaction": { "external_id": "SAMPLE-BAD-010", "source": "csv", "amount_minor": 15900, "currency": "PESO", "transaction_ts": "2026-01-15T02:00:00.000Z" }
+    },
+    {
+      "case": "timestamp is February 30 (not a real date)",
+      "expect": "invalid_timestamp",
+      "transaction": { "external_id": "SAMPLE-BAD-011", "source": "csv", "amount_minor": 15900, "currency": "PHP", "transaction_ts": "2026-02-30T10:00:00Z" }
+    },
+    {
+      "case": "timestamp is not ISO 8601 UTC",
+      "expect": "invalid_timestamp",
+      "transaction": { "external_id": "SAMPLE-BAD-012", "source": "csv", "amount_minor": 15900, "currency": "PHP", "transaction_ts": "2026-01-15 10:00:00" }
+    },
+    {
+      "case": "timestamp is before 2000",
+      "expect": "invalid_timestamp",
+      "transaction": { "external_id": "SAMPLE-BAD-013", "source": "csv", "amount_minor": 15900, "currency": "PHP", "transaction_ts": "1999-12-31T23:59:59Z" }
+    },
+    {
+      "case": "timestamp is in the future",
+      "expect": "future_timestamp",
+      "transaction": { "external_id": "SAMPLE-BAD-014", "source": "csv", "amount_minor": 15900, "currency": "PHP", "transaction_ts": "2099-01-01T00:00:00Z" }
+    },
+    {
+      "case": "payload is a string, not an object",
+      "expect": "invalid_payload",
+      "transaction": { "external_id": "SAMPLE-BAD-015", "source": "csv", "amount_minor": 15900, "currency": "PHP", "transaction_ts": "2026-01-15T02:00:00.000Z", "payload": "not an object" }
+    },
+    {
+      "case": "items list is empty",
+      "expect": "invalid_items",
+      "transaction": { "external_id": "SAMPLE-BAD-016", "source": "csv", "amount_minor": 15900, "currency": "PHP", "transaction_ts": "2026-01-15T02:00:00.000Z", "payload": { "items": [] } }
+    },
+    {
+      "case": "item quantity is 0",
+      "expect": "invalid_items",
+      "transaction": { "external_id": "SAMPLE-BAD-017", "source": "csv", "amount_minor": 0, "currency": "PHP", "transaction_ts": "2026-01-15T02:00:00.000Z", "payload": { "items": [ { "sku": "SAL-002", "name": "Salsa Verde 250g", "qty": 0, "unit_price": "159.00" } ] } }
+    },
+    {
+      "case": "item price has 3 decimals",
+      "expect": "invalid_items",
+      "transaction": { "external_id": "SAMPLE-BAD-018", "source": "csv", "amount_minor": 15900, "currency": "PHP", "transaction_ts": "2026-01-15T02:00:00.000Z", "payload": { "items": [ { "sku": "SAL-002", "name": "Salsa Verde 250g", "qty": 1, "unit_price": "159.001" } ] } }
+    },
+    {
+      "case": "discount is negative",
+      "expect": "invalid_discount",
+      "transaction": { "external_id": "SAMPLE-BAD-019", "source": "csv", "amount_minor": 16400, "currency": "PHP", "transaction_ts": "2026-01-15T02:00:00.000Z", "payload": { "discount": "-5.00", "items": [ { "sku": "SAL-002", "name": "Salsa Verde 250g", "qty": 1, "unit_price": "159.00" } ] } }
+    },
+    {
+      "case": "amount does not match items (2 x 159.00 = 318.00, not 400.00)",
+      "expect": "amount_mismatch",
+      "transaction": { "external_id": "SAMPLE-BAD-020", "source": "csv", "amount_minor": 40000, "currency": "PHP", "transaction_ts": "2026-01-15T02:00:00.000Z", "payload": { "discount": "0.00", "items": [ { "sku": "SAL-002", "name": "Salsa Verde 250g", "qty": 2, "unit_price": "159.00" } ] } }
+    },
+    {
+      "case": "valid row (control: should be accepted)",
+      "expect": null,
+      "transaction": { "external_id": "SAMPLE-OK-001", "source": "csv", "amount_minor": 31800, "currency": "PHP", "transaction_ts": "2026-01-15T02:00:00.000Z", "payload": { "store_id": "STORE-SAMPLE", "payment_method": "cash", "discount": "0.00", "items": [ { "sku": "SAL-002", "name": "Salsa Verde 250g", "qty": 2, "unit_price": "159.00" } ] } }
+    },
+    {
+      "case": "exact copy of SAMPLE-OK-001 in the same batch",
+      "expect": "duplicate_in_batch",
+      "transaction": { "external_id": "SAMPLE-OK-001", "source": "csv", "amount_minor": 31800, "currency": "PHP", "transaction_ts": "2026-01-15T02:00:00.000Z", "payload": { "store_id": "STORE-SAMPLE", "payment_method": "cash", "discount": "0.00", "items": [ { "sku": "SAL-002", "name": "Salsa Verde 250g", "qty": 2, "unit_price": "159.00" } ] } }
+    },
+    {
+      "case": "valid row with a discount (2 x 329.00 - 50.00 = 608.00)",
+      "expect": null,
+      "transaction": { "external_id": "SAMPLE-OK-002", "source": "csv", "amount_minor": 60800, "currency": "PHP", "transaction_ts": "2026-01-15T03:00:00.000Z", "payload": { "store_id": "STORE-SAMPLE", "payment_method": "gcash", "discount": "50.00", "items": [ { "sku": "BUN-001", "name": "Fiesta Bundle (Salsa + Chips + Guac)", "qty": 2, "unit_price": "329.00" } ] } }
+    }
+  ]
+}
