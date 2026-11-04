@@ -6,6 +6,16 @@
 //   npm run pipeline -- --full               print complete responses
 //   npm run pipeline -- --since 2026-10-12T00:00:00Z
 //   npm run pipeline -- --date 2026-10-01 --tz +08:00
+//   npm run pipeline -- --input data/samples/bad-transactions.json
+//   npm run pipeline -- --input <file.json> --no-load   transform only
+//
+// --input skips the extractor and sends the transactions in a JSON file
+// straight to the transformer, to test wrong data. The file is either an
+// array of raw transactions or { "cases": [ { "case", "expect", "transaction" } ] }
+// where expect is the rejection reason the transformer should give (null for
+// a valid row). With cases, the run ends with an expected-vs-actual table and
+// exits 1 on any mismatch. --no-load stops after the transformer, so nothing
+// is written to the database.
 //
 // Steps (docs/http-contract.md section 5):
 //   1. GET  /health          every service
@@ -23,7 +33,10 @@
 
 "use strict";
 
+const crypto = require("crypto");
+const fs = require("fs");
 const http = require("http");
+const path = require("path");
 
 let config;
 try {
@@ -41,6 +54,8 @@ const FULL = process.argv.includes("--full");
 const SINCE = arg("--since");
 const DATE = arg("--date");
 const TZ = arg("--tz");
+const INPUT = arg("--input");
+const NO_LOAD = process.argv.includes("--no-load");
 const PREVIEW_ROWS = 2;
 
 const url = (service, route) => `http://${config.host}:${config.services[service].port}${route}`;
@@ -111,6 +126,43 @@ async function step(n, title, method, service, route, payload) {
   return res.data;
 }
 
+// Reads --input: a plain array of transactions, or { cases: [...] } with an
+// expected rejection reason per transaction.
+function readInput(file) {
+  const full = path.resolve(process.cwd(), file);
+  let data;
+  try {
+    data = JSON.parse(fs.readFileSync(full, "utf8"));
+  } catch (err) {
+    throw new Error(`cannot read --input ${full}: ${err.message}`);
+  }
+  if (Array.isArray(data)) return { transactions: data, cases: null };
+  if (data && Array.isArray(data.cases)) {
+    data.cases.forEach((c, i) => {
+      if (!c || typeof c !== "object" || !("transaction" in c)) throw new Error(`--input case ${i} has no "transaction"`);
+    });
+    return { transactions: data.cases.map((c) => c.transaction), cases: data.cases };
+  }
+  throw new Error(`--input ${full} must be an array of transactions or { "cases": [...] }`);
+}
+
+// Compares each case's expected reason with what the transformer returned.
+function checkCases(cases, transformed) {
+  const actual = new Map(transformed.rejected.map((r) => [r.index, r.reason]));
+  header("3b", "Expected vs actual (from --input cases)");
+  let mismatches = 0;
+  cases.forEach((c, i) => {
+    const want = c.expect ?? null;
+    const got = actual.get(i) ?? null;
+    const ok = want === got;
+    if (!ok) mismatches++;
+    const label = (v) => (v === null ? "accepted" : v);
+    console.log(`  ${ok ? "PASS" : "FAIL"}  #${String(i).padStart(2)} ${label(got).padEnd(20)} ${c.case || ""}${ok ? "" : `  (expected ${label(want)})`}`);
+  });
+  console.log(`\n  ${cases.length - mismatches}/${cases.length} cases behaved as expected`);
+  return mismatches;
+}
+
 // Local calendar date of an ISO instant at offset tz ("+08:00", "Z", or the
 // machine's offset when absent), so the default report day matches the data.
 function localDate(iso, tz) {
@@ -139,14 +191,38 @@ async function main() {
       down.push(svc.name);
     }
   }
-  const required = ["extractor", "transformer", "loader", "notifier", "reporter"];
+  const required = NO_LOAD ? ["transformer"] : ["transformer", "loader", "notifier", "reporter"];
+  if (!INPUT) required.unshift("extractor");
   const missing = required.filter((s) => down.includes(s));
   if (missing.length) throw new Error(`not running: ${missing.join(", ")}. Start the stack with .\\start-etl.ps1`);
 
-  const extracted = await step(2, "Extractor: read the CSV", "POST", "extractor", "/extract", SINCE ? { since: SINCE } : {});
+  let extracted;
+  let cases = null;
+  if (INPUT) {
+    const input = readInput(INPUT);
+    cases = input.cases;
+    header(2, `Extractor: skipped, using --input ${INPUT}`);
+    console.log(`  ${input.transactions.length} transactions read from the file`);
+    extracted = { run_id: `sample-${crypto.randomUUID()}`, rows: input.transactions.length, transactions: input.transactions, rejected: [] };
+  } else {
+    extracted = await step(2, "Extractor: read the CSV", "POST", "extractor", "/extract", SINCE ? { since: SINCE } : {});
+  }
   const transformed = await step(3, "Transformer: validate, clean, dedupe", "POST", "transformer", "/transform", {
     transactions: extracted.transactions,
   });
+  let mismatches = 0;
+  if (cases) mismatches = checkCases(cases, transformed);
+  const fail = () => {
+    if (mismatches) {
+      console.error(`\n${mismatches} case(s) did not get the expected result.`);
+      process.exitCode = 1;
+    }
+  };
+  if (NO_LOAD) {
+    console.log(`\n--no-load: stopped after the transformer, nothing written to the database.`);
+    return fail();
+  }
+
   const loaded = await step(4, "Loader: write to SQLite", "POST", "loader", "/load", {
     run_id: extracted.run_id,
     transactions: transformed.transactions,
@@ -160,12 +236,13 @@ async function main() {
 
   await step(5, "Notifier: record the outcome", "POST", "notifier", "/notify", {
     channel: "log",
-    subject: "ETL run completed (manual)",
+    subject: INPUT ? "ETL sample run completed (manual)" : "ETL run completed (manual)",
     body: summary,
   });
 
-  // Default report day: the newest transaction in this batch, else today.
-  const newest = extracted.transactions.reduce(
+  // Default report day: the newest accepted transaction, else today. Rejected
+  // rows are skipped, so a bad far-future timestamp cannot pick the day.
+  const newest = transformed.transactions.reduce(
     (max, tx) => (typeof tx.transaction_ts === "string" && tx.transaction_ts > max ? tx.transaction_ts : max),
     ""
   );
@@ -176,6 +253,7 @@ async function main() {
   await step(7, "Reporter: recent activity", "GET", "reporter", "/report/activity?limit=5");
 
   console.log(`\n${"=".repeat(70)}\n DONE  ${summary}\n${"=".repeat(70)}`);
+  fail();
 }
 
 main().catch((err) => {

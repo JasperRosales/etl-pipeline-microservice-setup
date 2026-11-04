@@ -13,8 +13,15 @@
     "health": "node scripts/health-check.js",
     "smoke": "node scripts/smoke-test.js",
     "pipeline": "node scripts/run-pipeline.js",
+    "pipeline:bad": "node scripts/run-pipeline.js --input data/samples/bad-transactions.json",
     "etl:start": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\start-etl.ps1",
     "etl:stop": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\stop-etl.ps1",
+    "start:extractor": "node services/extractor/index.js",
+    "start:transformer": "node services/transformer/index.js",
+    "start:loader": "node scripts/init-db.js && node services/loader/index.js",
+    "start:reporter": "node scripts/init-db.js && node services/reporter/index.js",
+    "start:notifier": "node scripts/init-db.js && node services/notifier/index.js",
+    "start:scheduler": "node services/scheduler/index.js",
     "test": "node --test \"test/*.test.js\""
   },
   "dependencies": {

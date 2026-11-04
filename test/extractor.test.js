@@ -29,10 +29,13 @@ test("converts amounts to integer minor units without float drift", () => {
   assert.equal(toTransaction({ id: 1, amount: "1.005" }).amount_minor, 100); // rounds, still an integer
 });
 
-test("stringifies numeric ids and defaults currency to USD", () => {
+test("stringifies numeric ids and defaults a blank currency to PHP", () => {
   const tx = toTransaction({ id: 42, amount: "1" });
   assert.equal(tx.external_id, "42");
-  assert.equal(tx.currency, "USD");
+  assert.equal(tx.currency, "PHP");
+  assert.equal(toTransaction({ id: 1, amount: "1", currency: "" }).currency, "PHP");
+  assert.equal(toTransaction({ id: 1, amount: "1", currency: "   " }).currency, "PHP");
+  assert.equal(toTransaction({ id: 1, amount: "1", currency: " usd " }).currency, "USD");
 });
 
 test("passes bad rows through so the transformer can reject them", () => {

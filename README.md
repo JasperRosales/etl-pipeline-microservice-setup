@@ -293,6 +293,52 @@ The scheduler runs the pipeline every **30 seconds** (`ETL_CRON=*/30 * * * * *`,
 fires, that tick is skipped and logged as `tick_skipped`. Use a 5-field
 expression such as `*/15 * * * *` for a slower schedule.
 
+### Start one service on its own
+
+```powershell
+npm run start:extractor      # 3001
+npm run start:transformer    # 3002
+npm run start:loader         # 3003 (initializes the database first)
+npm run start:reporter       # 3004 (initializes the database first)
+npm run start:notifier       # 3005 (initializes the database first)
+npm run start:scheduler      # 3006
+```
+
+Each command runs one service in the foreground of the current terminal and
+prints its output there. Stop it with `Ctrl+C`. Use this to work on or debug a
+single service. A service that calls others (the scheduler, or
+`npm run pipeline`) still needs those services running too.
+
+### Run the pipeline once and show every output
+
+```powershell
+npm run pipeline             # add -- --full to print every row
+```
+
+Calls each service in order (health, extract, transform, load, notify, daily
+and activity reports) and prints every response. Requires the stack to be running.
+
+### Test the pipeline with wrong data
+
+```powershell
+npm run pipeline:bad                 # transform + load + report the sample file
+npm run pipeline:bad -- --no-load    # transform only, nothing written to the database
+npm run pipeline -- --input my-cases.json
+```
+
+`data/samples/bad-transactions.json` holds 23 sample transactions: one or
+more for every transformer rejection reason (`missing_external_id` through
+`duplicate_in_batch`) plus two valid control rows. Each case says which
+reason it should get (`"expect"`, or `null` for valid). The run skips the
+extractor, sends the file to the transformer, and prints an
+expected-vs-actual table. It exits with code 1 if any case does not match.
+
+To test a new kind of wrong data, add a case to the file (or write your own file
+in the same shape) with the reason you expect. The two valid rows
+(`SAMPLE-OK-001`, `SAMPLE-OK-002`, dated 2026-01-15, store `STORE-SAMPLE`)
+are loaded into the database once. Later runs count them as duplicates, and
+`npm run db:reset` removes them.
+
 ### Seed the database
 
 ```powershell
@@ -376,7 +422,8 @@ SQLite is recommended for the local prototype because it does not require a sepa
 
 The extractor reads transactions from the local CSV file at `CSV_PATH`
 (default `data/transactions.csv`), so the pipeline needs no internet access and
-no API token. Set `CSV_PATH` in `.env` to use a different file. Do not commit
+no API token. Set `CSV_PATH` in `.env` to use a different file. A row with an
+empty `currency` cell is loaded as `PHP`. Do not commit
 real customer data to the repository.
 
 ## 9. Recommended next step

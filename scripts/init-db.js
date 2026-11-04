@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS transactions (
   external_id    TEXT,
   source         TEXT NOT NULL,
   amount_minor   INTEGER NOT NULL,
-  currency       TEXT NOT NULL DEFAULT 'USD',
+  currency       TEXT NOT NULL DEFAULT 'PHP',
   transaction_ts TEXT NOT NULL,
   payload_json   TEXT,
   dedupe_hash    TEXT NOT NULL UNIQUE,

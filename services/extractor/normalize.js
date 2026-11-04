@@ -8,6 +8,9 @@
 // already-loaded rows look new, so reseed with `npm run db:reset`.
 const SOURCE = "csv";
 
+// Used when a row's currency cell is empty, whitespace-only, or missing.
+const DEFAULT_CURRENCY = "PHP";
+
 function toIso(value) {
   if (typeof value !== "string" && typeof value !== "number") return undefined;
   const d = new Date(value);
@@ -20,10 +23,10 @@ function toTransaction(row) {
     external_id: row.id === undefined || row.id === null ? undefined : String(row.id),
     source: SOURCE,
     amount_minor: cents,
-    currency: typeof row.currency === "string" && row.currency ? row.currency.toUpperCase() : "USD",
+    currency: typeof row.currency === "string" && row.currency.trim() ? row.currency.trim().toUpperCase() : DEFAULT_CURRENCY,
     transaction_ts: toIso(row.timestamp),
     payload: row,
   };
 }
 
-module.exports = { SOURCE, toIso, toTransaction };
+module.exports = { SOURCE, DEFAULT_CURRENCY, toIso, toTransaction };

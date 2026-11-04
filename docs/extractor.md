@@ -38,7 +38,7 @@ SALSA-TX-00001,2026-10-01T02:54:09.000Z,477.00,PHP,STORE-LIPA,C-101,maya,0.00,"[
 |---|---|---|
 | `id` | Identifies the source transaction | Any value converted to a string when present; omitted when missing or `null`. |
 | `amount` | Supplies the transaction amount | A value convertible to a number; malformed values are passed through as invalid minor-unit amounts for downstream validation. |
-| `currency` | Supplies the transaction currency | A non-empty string when available; otherwise the extractor uses `USD`. |
+| `currency` | Supplies the transaction currency | A non-empty string when available; otherwise the extractor uses `PHP`. |
 | `timestamp` | Supplies the transaction time | A string or number parseable as a JavaScript date; otherwise the normalized timestamp is omitted. |
 
 ### Raw Transaction Output
@@ -50,7 +50,7 @@ The extractor maps each source row into the raw transaction shape used by the ne
 | `external_id` | `STRING` or omitted | Source `id` converted to a string; downstream validation requires a usable identifier. |
 | `source` | `STRING` | Constant value `csv`. Part of the dedupe hash. |
 | `amount_minor` | `INTEGER` or invalid numeric value | Source `amount` multiplied by 100 and rounded; validated by the transformer. |
-| `currency` | `STRING` | Uppercased source currency or default `USD`. |
+| `currency` | `STRING` | Uppercased source currency or default `PHP`. |
 | `transaction_ts` | ISO 8601 UTC `STRING` or omitted | Normalized from source `timestamp` when parseable; validated by the transformer. |
 | `payload` | `OBJECT` | Original source row preserved for traceability. |
 
@@ -105,7 +105,7 @@ The extractor does not report source rows read, rejected-row counts, validation 
 | `id` | `external_id` | CSV text | `STRING` | Convert to string when present |
 | — | `source` | — | `STRING` | Constant `csv` |
 | `amount` | `amount_minor` | Numeric text | `INTEGER` cents | Multiply by 100 and round |
-| `currency` | `currency` | CSV text | `STRING` | Uppercase; default to `USD` when empty or absent |
+| `currency` | `currency` | CSV text | `STRING` | Uppercase; default to `PHP` when empty, whitespace-only, or absent |
 | `timestamp` | `transaction_ts` | Date text | ISO 8601 UTC `STRING` | Parse and normalize; omit if invalid |
 | Entire source row | `payload` | CSV row | JSON object | Preserve parsed row (`items` decoded from JSON) |
 
@@ -210,7 +210,7 @@ write to SQLite or call the other ETL services itself.
 
 The row mapping uses source `id` as a string `external_id` when present,
 `csv` as `source`, source `amount` converted to rounded integer
-cents as `amount_minor`, and the uppercased source currency or `USD` as
+cents as `amount_minor`, and the uppercased source currency or `PHP` as
 `currency`. A parseable source `timestamp` becomes ISO 8601 UTC
 `transaction_ts`; the original row is retained as `payload`. The extractor
 does not reject malformed individual rows; the transformer validates them.
