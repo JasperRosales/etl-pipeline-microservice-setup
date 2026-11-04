@@ -5,10 +5,10 @@
 //   npm run smoke
 //
 // How it works:
-//   1. Serves the fixture rows from a throwaway Sheets endpoint inside this
-//      process and starts a throwaway extractor on port 3099 with
-//      LOG_DIR=logs\smoke, so the real .env, ports, and service logs stay
-//      untouched.
+//   1. Writes the fixture rows to logs\smoke\fixture.csv and starts a
+//      throwaway extractor on port 3099 with CSV_PATH pointing at it and
+//      LOG_DIR=logs\smoke, so the real .env, CSV, ports, and service logs
+//      stay untouched.
 //   2. Drives the REAL transformer (3002) and loader (3003) over HTTP.
 //   3. Asserts: 3 fixture rows -> 2 valid + 1 rejected; loading the same rows
 //      again under a different run_id inserts 0 and skips 2; exactly 2
@@ -40,16 +40,17 @@ try {
   process.exit(1);
 }
 
-const FIXTURE_ROWS = [
-  { id: "SMOKE-001", amount: "10.00", currency: "USD", timestamp: "2026-01-01T12:00:00.000Z", row: 2 },
-  { id: "SMOKE-002", amount: "5.25", currency: "USD", timestamp: "2026-01-01T12:05:00.000Z", row: 3 },
-  { id: "SMOKE-BAD", amount: "not-a-number", currency: "USD", timestamp: "2026-01-01T12:10:00.000Z", row: 4 },
-];
+const FIXTURE_CSV = [
+  "id,amount,currency,timestamp",
+  "SMOKE-001,10.00,USD,2026-01-01T12:00:00.000Z",
+  "SMOKE-002,5.25,USD,2026-01-01T12:05:00.000Z",
+  "SMOKE-BAD,not-a-number,USD,2026-01-01T12:10:00.000Z",
+  "",
+].join("\n");
 const TEMP_EXTRACTOR_PORT = 3099;
 const SMOKE_LOG_DIR = path.join(projectRoot, "logs", "smoke");
 
 let failures = 0;
-let mock = null;
 let extractor = null;
 
 function check(name, ok, detail) {
@@ -111,25 +112,10 @@ async function waitFor(url, service, tries = 50, delayMs = 100) {
   return false;
 }
 
-function startMockSheets() {
-  return new Promise((resolve, reject) => {
-    const server = http.createServer((req, res) => {
-      const url = new URL(req.url, "http://127.0.0.1");
-      if (url.pathname === "/sheet" && url.searchParams.get("token") === "smoke-token") {
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify(FIXTURE_ROWS));
-        return;
-      }
-      res.writeHead(403, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: { code: "forbidden", message: "bad token" } }));
-    });
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => resolve(server));
-  });
-}
-
-function startTempExtractor(mockPort) {
+function startTempExtractor() {
   fs.mkdirSync(SMOKE_LOG_DIR, { recursive: true });
+  const csvPath = path.join(SMOKE_LOG_DIR, "fixture.csv");
+  fs.writeFileSync(csvPath, FIXTURE_CSV);
   const outFd = fs.openSync(path.join(SMOKE_LOG_DIR, "extractor.out.log"), "w");
   const errFd = fs.openSync(path.join(SMOKE_LOG_DIR, "extractor.err.log"), "w");
   const child = spawn(process.execPath, [path.join(projectRoot, "services", "extractor", "index.js")], {
@@ -137,8 +123,7 @@ function startTempExtractor(mockPort) {
     env: {
       ...process.env, // explicit values below win; dotenv never overrides existing vars
       PORT_EXTRACTOR: String(TEMP_EXTRACTOR_PORT),
-      SHEETS_ENDPOINT: `http://127.0.0.1:${mockPort}/sheet`,
-      API_TOKEN: "smoke-token",
+      CSV_PATH: csvPath,
       LOG_DIR: "./logs/smoke",
     },
     stdio: ["ignore", outFd, errFd],
@@ -168,11 +153,8 @@ async function stopTempExtractor(child) {
 
 async function cleanup() {
   const child = extractor;
-  const server = mock;
   extractor = null;
-  mock = null;
   await stopTempExtractor(child);
-  if (server) await new Promise((resolve) => server.close(resolve));
 }
 
 function countSmokeRows() {
@@ -227,9 +209,8 @@ async function main() {
   if (!transformerUp || !loaderUp) return;
 
   try {
-    // 1. Fixture endpoint + throwaway extractor.
-    mock = await startMockSheets();
-    extractor = startTempExtractor(mock.address().port);
+    // 1. Fixture CSV + throwaway extractor.
+    extractor = startTempExtractor();
     const extractorUp = await waitFor(`${extractorUrl}/health`, "extractor");
     check(`fixture extractor is up on port ${TEMP_EXTRACTOR_PORT}`, extractorUp,
       extractorUp ? "healthy" : tailFile(path.join(SMOKE_LOG_DIR, "extractor.err.log")));

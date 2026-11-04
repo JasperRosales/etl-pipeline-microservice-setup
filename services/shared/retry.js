@@ -1,8 +1,8 @@
 // Retry with exponential backoff (Issue 7, Day 7).
 //
-//   await withRetry(() => fetchSheets(args), {
+//   await withRetry(() => postToService(url, body), {
 //     attempts: 3,
-//     label: "extractor: Google Sheets",
+//     label: "scheduler: POST /extract",
 //     shouldRetry: (err) => !err.status || err.status >= 500,
 //     onRetry: (err, attempt, delayMs) => log.warn("retry", { attempt, delay_ms: delayMs, message: err.message }),
 //   });

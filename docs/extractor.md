@@ -8,22 +8,33 @@
 
 ## 1. Data Source and Extraction Specification
 
-- **Source System:** `salsa-pos-api` (`salsa-pos-api/`, deployed at `https://salsa-pos-api.onrender.com/transactions`), or any Google Apps Script Web App / Google Sheets-compatible HTTP endpoint that returns transaction rows in the same shape.
-- **Source Database or File:** JSON returned by the URL configured in `SHEETS_ENDPOINT`; the endpoint may return a JSON array or an object containing a `transactions` array.
-- **Extraction Method:** The Node.js extractor service exposes `POST /extract` on port 3001. It calls the configured endpoint with HTTP `GET`, sends `API_TOKEN` as the `token` query parameter, and optionally passes a normalized `since` value. Each upstream request has a 10-second timeout.
+- **Source System:** A local CSV file of POS transactions. The extractor no longer calls an HTTP API.
+- **Source Database or File:** The CSV file at `CSV_PATH` (default `./data/transactions.csv`, resolved against the project root). It has a header row and one transaction per row.
+- **Extraction Method:** The Node.js extractor service exposes `POST /extract` on port 3001. On each request it reads the whole CSV file, optionally keeps only rows at or after a normalized `since` value, and maps each row.
 - **Schedule and Invocation:** The extractor does not schedule itself. It is called by the scheduler service according to `ETL_CRON` (default: every 30 seconds, `*/30 * * * * *`), or can be called directly.
-- **Extraction Scope:** Source transaction rows returned by the endpoint. An optional `since` request value limits the upstream query; no default date window is applied when it is omitted.
-- **Source Limitations and Assumptions:** `SHEETS_ENDPOINT` and `API_TOKEN` must be configured. The upstream endpoint must be reachable and return valid JSON in one of the supported response shapes.
+- **Extraction Scope:** Every row in the CSV file. An optional `since` request value keeps rows whose `timestamp` is at or after it (rows with an unparseable timestamp are kept so the transformer can reject them); no default date window is applied when it is omitted.
+- **Source Limitations and Assumptions:** The CSV file must exist, be readable as UTF-8, and have an `id` column in its header. The file is re-read on every run, so rows appended between runs are picked up on the next run; rows already loaded are skipped by the loader's dedupe hash.
 
 ---
 
 ## 2. Source Tables and Column Specification
 
-### Upstream Transaction Rows
+### CSV Transaction Rows
 
-The endpoint returns JSON transaction row objects. The upstream field values are supplied by the endpoint; the extractor does not read a CSV file or extract a separate products table.
+The CSV file has a header row and one transaction per row. Example:
 
-| Source Field | Purpose | Expected Value |
+```csv
+id,timestamp,amount,currency,store_id,cashier_id,payment_method,discount,items
+SALSA-TX-00001,2026-10-01T02:54:09.000Z,477.00,PHP,STORE-LIPA,C-101,maya,0.00,"[{""sku"":""SAL-002"",""name"":""Salsa Verde 250g"",""qty"":3,""unit_price"":""159.00""}]"
+```
+
+- Standard CSV quoting: a field may be wrapped in double quotes, `""` inside it is a literal quote, and quoted fields may contain commas and line breaks. LF or CRLF line endings and an Excel UTF-8 BOM are accepted.
+- Header names and cell values are trimmed. Empty cells are left out of the row, so a blank `amount` is rejected by the transformer rather than loaded as 0.
+- `items` holds a JSON array of line items (`sku`, `name`, `qty`, `unit_price`) used by the reporter. A cell that is not valid JSON is kept as text.
+- Every row gets a `row` value, its position in the file with the header as row 1, unless the file has its own `row` column.
+- Other columns (`store_id`, `cashier_id`, `payment_method`, `discount`, …) are kept in `payload` as text.
+
+| Source Column | Purpose | Expected Value |
 |---|---|---|
 | `id` | Identifies the source transaction | Any value converted to a string when present; omitted when missing or `null`. |
 | `amount` | Supplies the transaction amount | A value convertible to a number; malformed values are passed through as invalid minor-unit amounts for downstream validation. |
@@ -37,7 +48,7 @@ The extractor maps each source row into the raw transaction shape used by the ne
 | Column | Data Type | Key / Relationship |
 |---|---|---|
 | `external_id` | `STRING` or omitted | Source `id` converted to a string; downstream validation requires a usable identifier. |
-| `source` | `STRING` | Constant value `salsa-pos-api`. |
+| `source` | `STRING` | Constant value `salsa-pos-api`, kept from the API era so rows loaded before the CSV switch keep the same dedupe hash. |
 | `amount_minor` | `INTEGER` or invalid numeric value | Source `amount` multiplied by 100 and rounded; validated by the transformer. |
 | `currency` | `STRING` | Uppercased source currency or default `USD`. |
 | `transaction_ts` | ISO 8601 UTC `STRING` or omitted | Normalized from source `timestamp` when parseable; validated by the transformer. |
@@ -51,8 +62,8 @@ The extractor maps each source row into the raw transaction shape used by the ne
 
 | Check Name | Target | Purpose | Validation Criteria |
 |---|---|---|---|
-| Optional `since` validation | `POST /extract` request body | Prevents an invalid date filter from being sent upstream. | If provided, `since` must be a string accepted by JavaScript's date parser; it is normalized to ISO 8601 UTC. |
-| Upstream response validation | Successful endpoint response | Ensures the response can be read as supported transaction rows. | Body must be valid JSON containing either an array or a `transactions` array. |
+| Optional `since` validation | `POST /extract` request body | Prevents an invalid date filter. | If provided, `since` must be a string accepted by JavaScript's date parser; it is normalized to ISO 8601 UTC. |
+| CSV file validation | File at `CSV_PATH` | Ensures the file can be read as transaction rows. | The file must exist and be readable, must not end inside an unterminated quoted field, and its header must include `id`. |
 | Row-level data validation | Individual source rows | Keeps extraction separate from transaction validation. | The extractor maps rows but does not reject malformed records or check duplicates; the transformer performs row validation and in-batch deduplication. |
 
 ---
@@ -65,8 +76,7 @@ The extractor maps each source row into the raw transaction shape used by the ne
 | Source row count | Number of mapped transactions returned by the extractor | `rows: 2` |
 | Returned transactions | Raw transaction records handed to the next stage | `transactions: [...]` |
 | Extraction status | Indicates whether the extraction request succeeded or failed | HTTP 200 response or error response |
-| Successful extraction log | Records the run identifier and row count | `extract` event with `run_id` and `rows` |
-| Retry log | Records a retry attempt and delay for a transient upstream failure | `retry` event with `attempt` and `delay_ms` |
+| Successful extraction log | Records the run identifier, row count and file read | `extract` event with `run_id`, `rows` and `file` |
 | Error log | Records the run identifier and error message when extraction fails | `extract_failed` event |
 
 The extractor does not report source rows read, rejected-row counts, validation summaries, or extraction duration. Those are not part of its current response/log metadata.
@@ -84,18 +94,18 @@ The extractor does not report source rows read, rejected-row counts, validation 
 
 - **Required Schema:** Each mapped row follows the raw transaction contract: `external_id`, `source`, `amount_minor`, `currency`, `transaction_ts`, and `payload`. Fields with no valid source value may be omitted or remain invalid for transformer validation.
 - **Naming Convention:** Output fields use `snake_case`. `amount_minor` represents rounded integer cents; parseable timestamps are ISO 8601 UTC strings.
-- **Source Envelope:** The upstream response must be a JSON array or `{ "transactions": [...] }`. The original source row is retained in `payload`.
+- **Source File:** A CSV file with a header row that includes `id`. The parsed row (with `items` decoded and `row` added) is retained in `payload`.
 
 ### Source-to-Standardized Field Mappings
 
 | Source Column | Standardized Column | Source Type | Target Type | Mapping Type |
 |---|---|---|---|---|
-| `id` | `external_id` | Any JSON value | `STRING` | Convert to string when present |
+| `id` | `external_id` | CSV text | `STRING` | Convert to string when present |
 | — | `source` | — | `STRING` | Constant `salsa-pos-api` |
-| `amount` | `amount_minor` | Numeric or numeric string | `INTEGER` cents | Multiply by 100 and round |
-| `currency` | `currency` | `STRING` | `STRING` | Uppercase; default to `USD` when empty or absent |
-| `timestamp` | `transaction_ts` | String or number | ISO 8601 UTC `STRING` | Parse and normalize; omit if invalid |
-| Entire source row | `payload` | JSON object | JSON object | Preserve original row |
+| `amount` | `amount_minor` | Numeric text | `INTEGER` cents | Multiply by 100 and round |
+| `currency` | `currency` | CSV text | `STRING` | Uppercase; default to `USD` when empty or absent |
+| `timestamp` | `transaction_ts` | Date text | ISO 8601 UTC `STRING` | Parse and normalize; omit if invalid |
+| Entire source row | `payload` | CSV row | JSON object | Preserve parsed row (`items` decoded from JSON) |
 
 ---
 
@@ -103,15 +113,15 @@ The extractor does not report source rows read, rejected-row counts, validation 
 
 | Overall Condition | Acceptance Decision | Pipeline Action |
 |---|---|---|
-| The upstream call succeeds and returns a supported JSON envelope | **ACCEPTED** | Return `{ run_id, rows, transactions }` to the caller. |
+| The CSV file is read and parsed | **ACCEPTED** | Return `{ run_id, rows, transactions }` to the caller. |
 | A row contains missing or invalid transaction fields | **EXTRACTED, THEN VALIDATED DOWNSTREAM** | Return the mapped row; the transformer validates it and records any rejection. |
 | `since` is invalid | **FAILED** | Return HTTP 400 (`invalid_request`); the scheduler stops the current pipeline run and handles the failure. |
-| The upstream call fails after retries | **FAILED** | Return HTTP 500 (`internal_error`); the scheduler stops the current pipeline run and handles the failure. |
+| The CSV file is missing, unreadable, or malformed | **FAILED** | Return HTTP 500 (`internal_error`); the scheduler stops the current pipeline run and handles the failure. |
 
 ### Validation Summary
 
 - Optional `since` request validation: **PASS** when omitted or valid; otherwise the request is rejected.
-- Upstream response validation: **PASS** when the body is valid JSON in a supported array format; otherwise extraction fails.
+- CSV file validation: **PASS** when the file exists, parses, and has an `id` column; otherwise extraction fails.
 - Individual row validation and in-batch duplicate checking: **DEFERRED TO THE TRANSFORMER**.
 
 **Handover:** The scheduler sends the returned transactions to the transformer and carries the same `run_id` through to the loader. The extractor does not write to the database or invoke downstream services itself.
@@ -120,19 +130,19 @@ The extractor does not report source rows read, rejected-row counts, validation 
 
 ## 8. Common Extraction Problems and Mitigation
 
-### Problem 1: Upstream Endpoint Unavailable or Returning Server Errors
+### Problem 1: CSV File Missing or Unreadable
 
-- **Problem Description:** The configured endpoint cannot be reached or responds with an HTTP 5xx status.
-- **Possible Cause:** Network interruption, unavailable upstream service, or temporary server failure.
-- **Impact on Extraction Process:** The extractor cannot retrieve rows for the current request.
-- **Proposed Solution / Mitigation:** Retry transport errors and 5xx responses up to three attempts using exponential backoff. If all attempts fail, return an error and log the failure.
+- **Problem Description:** The file at `CSV_PATH` does not exist or cannot be read.
+- **Possible Cause:** Wrong `CSV_PATH`, the file was moved or renamed, or it is locked by another program.
+- **Impact on Extraction Process:** The extractor cannot read rows for the current run.
+- **Proposed Solution / Mitigation:** Return HTTP 500 with `CSV file not found: <path>` (or the read error) and log `extract_failed`. The scheduler retries on its next tick; nothing is loaded until the file is back.
 
-### Problem 2: Invalid Upstream Response
+### Problem 2: Malformed CSV File
 
-- **Problem Description:** A successful upstream response is not valid JSON or does not contain an array of rows in a supported envelope.
-- **Possible Cause:** The endpoint returns an error page, malformed JSON, or an unexpected response structure.
-- **Impact on Extraction Process:** The extractor cannot map the response into raw transaction records.
-- **Proposed Solution / Mitigation:** Fail the request without retrying deterministic malformed-response errors; log the failure for investigation.
+- **Problem Description:** The file has an unterminated quoted field or no `id` column in its header.
+- **Possible Cause:** Hand-edited file, a spreadsheet export with different headers, or a partially written file.
+- **Impact on Extraction Process:** The extractor cannot map the file into raw transaction records.
+- **Proposed Solution / Mitigation:** Fail the request with the parse error and log it for investigation. Individual bad cells (such as a non-numeric amount) do not fail the file; the transformer rejects those rows.
 
 ### Problem 3: Invalid or Duplicate Transaction Rows
 
@@ -145,45 +155,42 @@ The extractor does not report source rows read, rejected-row counts, validation 
 
 ## Instructions
 
-The extractor fetches source rows from the configured Google Apps Script or
-Google Sheets endpoint, maps them to raw transaction records, and creates the
+The extractor reads source rows from the CSV file at `CSV_PATH`, maps them to
+raw transaction records, and creates the
 `run_id` used to trace the batch. It is configured through the shared `.env`
 file and is called by the scheduler or directly with `POST /extract`.
 
 1. Copy `.env.example` to `.env` in the microservice project root.
-2. Keep `SHEETS_ENDPOINT=https://salsa-pos-api.onrender.com/transactions` and
-   `API_TOKEN` exactly as they are in `.env.example`. That token is only for the
-   shared Render deployment of salsa-pos-api.
+2. Keep `CSV_PATH=./data/transactions.csv`, or point it at your own CSV file.
+   The bundled file holds the 120 demo sales.
 3. Start the services with `.\start-etl.ps1` from the microservice project.
 4. Let the scheduler trigger the service or call `POST /extract` on port 3001.
 5. Review the response's `run_id`, `rows`, and `transactions`.
 
 An optional `since` request field is accepted. When supplied, it must be a
 string accepted by JavaScript's date parser; it is normalized to ISO 8601 UTC
-before being sent upstream. No default date window is applied when it is
-omitted.
+and only rows at or after it are returned. No default date window is applied
+when it is omitted.
 
 ## Architecture
 
 The implementation is in `services/extractor/index.js`. It uses the shared
 Express bootstrap (`services/shared/app.js`) for the health route, request
 handling, and common error responses; shared configuration
-(`services/shared/config.js`) for the endpoint, token, host, and port; and the
-shared retry helper (`services/shared/retry.js`) for transient upstream errors.
+(`services/shared/config.js`) for the CSV path, host, and port. CSV parsing
+is in `services/extractor/csv.js` and row mapping in
+`services/extractor/normalize.js`.
 
-The service sends a GET request to the configured upstream URL, including
-`since` when supplied and the API token in the `token` query parameter. It
-accepts a JSON array or an object containing a `transactions` array, maps each
-row, and returns the results. It does not write to SQLite or call the other ETL
-services itself.
+The service reads the CSV file on every request, parses it, applies the
+optional `since` filter, maps each row, and returns the results. It does not
+write to SQLite or call the other ETL services itself.
 
 ## Tech Stack
 
 - Node.js 
 - Express.js
-- Native `fetch`, `URL`, `AbortSignal.timeout`, and `crypto.randomUUID`
+- Built-in CSV parser (no extra dependency), `fs`, and `crypto.randomUUID`
 - `dotenv` through the shared configuration module
-- Shared exponential-backoff retry helper
 - JSON over local HTTP
 
 ## Process
@@ -191,14 +198,11 @@ services itself.
 1. The caller sends `POST /extract` with an optional `since` field to port 3001.
 2. The service validates `since` if present and normalizes it to UTC.
 3. It creates a UUID v4 `run_id`.
-4. It issues a GET to `SHEETS_ENDPOINT`, passing `since` when present and
-   `API_TOKEN` as a `token` query parameter. The request timeout is 10 seconds.
-5. It retries transient transport errors and upstream 5xx responses up to
-   three attempts with exponential backoff. Upstream 4xx responses and
-   malformed successful response bodies are not retried.
-6. It requires the successful response to be valid JSON in array form or
-   `{ "transactions": [...] }` form.
-7. It maps each source row into the raw transaction shape and responds with
+4. It reads and parses the CSV file at `CSV_PATH`. A missing file, an
+   unterminated quoted field, or a header without `id` fails the request
+   with HTTP 500.
+5. When `since` is present it keeps rows whose `timestamp` is at or after it.
+6. It maps each source row into the raw transaction shape and responds with
    `{ run_id, rows, transactions }`.
 
 The row mapping uses source `id` as a string `external_id` when present,
@@ -210,7 +214,7 @@ does not reject malformed individual rows; the transformer validates them.
 
 ## Data Flow
 
-The upstream endpoint returns source rows. The extractor maps these into
+The CSV file supplies source rows. The extractor maps these into
 canonical raw transaction objects and returns them with a new `run_id`. The
 scheduler forwards the transactions to the transformer and carries the same
 `run_id` to the loader. The extractor is stateless between requests and does
@@ -220,17 +224,15 @@ not persist data.
 
 ### Extractor Service
 
-- **Purpose:** Fetch source transaction rows and map them to the raw ETL
-  transaction shape.
-- **Responsibilities:** Validate the optional `since` value, call the
-  configured upstream endpoint, validate its response envelope, map rows, and
-  assign a run identifier.
-- **Inputs:** Optional `{ "since": "..." }` request body plus `SHEETS_ENDPOINT`
-  and `API_TOKEN` configuration.
+- **Purpose:** Read source transaction rows from a CSV file and map them to
+  the raw ETL transaction shape.
+- **Responsibilities:** Validate the optional `since` value, read and parse
+  the CSV file, filter by `since`, map rows, and assign a run identifier.
+- **Inputs:** Optional `{ "since": "..." }` request body plus the `CSV_PATH`
+  configuration.
 - **Outputs:** `{ run_id, rows, transactions }`; each transaction contains
   `external_id`, `source`, `amount_minor`, `currency`, `transaction_ts`, and
   `payload` where source data permits.
-- **Dependencies:** Google Apps Script or Sheets-compatible HTTP endpoint,
-  API token, shared config, shared app, and retry helper.
+- **Dependencies:** The CSV file, shared config, and shared app.
 - **Interactions:** Called by the scheduler; returns raw transactions for the
   transformer and a `run_id` later passed to the loader.

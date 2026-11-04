@@ -25,9 +25,9 @@ Every service binds to `127.0.0.1` only (no LAN exposure) on the port from
   responses are `application/json; charset=utf-8`. No HTML error pages.
 - **Body limit:** 5 MB. Larger requests are rejected by Express with 413.
 - **Unknown routes:** `404` with the error envelope (section 3).
-- **No auth between services.** They are localhost-only. The token
-  (`API_TOKEN`) is used only on the outbound call from the extractor to Google
-  Sheets (README section 8), never between these services.
+- **No auth between services.** They are localhost-only. The extractor reads
+  its source from a local CSV file (`CSV_PATH`, README section 8), so no
+  tokens are involved anywhere.
 - **Client timeout:** every service calling another service (the scheduler is the
   first client) uses a **10 second** request timeout and treats a timeout as a
   failure of that stage.
@@ -103,11 +103,11 @@ start. `service` is the service name.
 
 | | |
 |---|---|
-| Request | `{ "since": "2026-10-12T00:00:00Z" }` — `since` optional; when absent the extractor uses its default window (the last full day) |
+| Request | `{ "since": "2026-10-12T00:00:00Z" }` — `since` optional; keeps CSV rows whose `timestamp` is at or after it; when absent every row is returned |
 | Response 200 | `{ "run_id": "b3f1...", "rows": 2, "transactions": [ …raw transactions… ] }` |
 | Response 400 | `invalid_request` — `since` present but not ISO 8601 |
-| Response 500 | `internal_error` — Google Sheets / Apps Script call failed after its own retries |
-| Failure modes | Bad `API_TOKEN` or unreachable endpoint upstream → 500; empty sheet → 200 with `rows: 0` and `transactions: []` |
+| Response 500 | `internal_error` — the CSV file at `CSV_PATH` is missing, unreadable, or malformed (unterminated quote, no `id` column) |
+| Failure modes | Missing or malformed CSV → 500; header-only or empty file → 200 with `rows: 0` and `transactions: []` |
 
 `run_id` is minted here (UUID v4) and **carried by the caller** (scheduler)
 through the pipeline into `POST /load`. `rows` always equals

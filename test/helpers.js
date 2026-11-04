@@ -18,13 +18,12 @@ function tempDir(prefix) {
 function isolatedEnv(overrides = {}) {
   const env = { ...process.env };
   for (const key of Object.keys(env)) {
-    if (/^(PORT_|SCHEDULER_PORT|DB_PATH|LOG_DIR|ETL_CRON|SHEETS_ENDPOINT|APPS_SCRIPT_URL|API_TOKEN)/.test(key)) delete env[key];
+    if (/^(PORT_|SCHEDULER_PORT|DB_PATH|LOG_DIR|ETL_CRON|CSV_PATH|SHEETS_ENDPOINT|APPS_SCRIPT_URL|API_TOKEN)/.test(key)) delete env[key];
   }
   return {
     ...env,
     ETL_ENV_FILE: path.join(os.tmpdir(), "etl-test-no-such.env"),
-    SHEETS_ENDPOINT: "http://127.0.0.1:9/never-called",
-    API_TOKEN: "test-token",
+    CSV_PATH: path.join(os.tmpdir(), "etl-test-no-such.csv"),
     ...overrides,
   };
 }

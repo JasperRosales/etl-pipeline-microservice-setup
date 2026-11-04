@@ -59,7 +59,7 @@ The system is organized around six services: extractor, transformer, loader, rep
 
 | Service | Local port | Responsibility |
 |---|---:|---|
-| Extractor | 3001 | Retrieves transaction data from Google Sheets or an Apps Script endpoint |
+| Extractor | 3001 | Reads transaction data from a CSV file (`CSV_PATH`) |
 | Transformer | 3002 | Validates, cleans, and deduplicates extracted data |
 | Loader | 3003 | Stores processed transactions in SQLite |
 | Reporter | 3004 | Generates sales reports |
@@ -263,27 +263,22 @@ Open PowerShell in the project directory.
 
 ```powershell
 npm install
-Copy-Item .env.example .env    # works as is with the shared Render API
+Copy-Item .env.example .env    # works as is with the bundled CSV
 ```
 
-The extractor pulls sales from the shared **salsa-pos-api** on Render.
-`.env.example` already includes the URL and the API token, so leave these two
-lines as they are:
+The extractor reads sales from a CSV file. `.env.example` points it at the
+bundled demo file (120 sales):
 
 ```
-SHEETS_ENDPOINT=https://salsa-pos-api.onrender.com/transactions
-API_TOKEN=<value already in .env.example>
+CSV_PATH=./data/transactions.csv
 ```
 
-> **Note:** the `API_TOKEN` in `.env.example` is only for this shared Render
-> setup, which serves demo seed data. It is not a production secret. If you
-> deploy your own salsa-pos-api, generate a new token and keep it out of git.
-
-Without the token, the API responds `401 unauthorized`. To check your settings
-before starting the services, open
-`https://salsa-pos-api.onrender.com/transactions?token=<API_TOKEN>` in a browser.
-You should see the seeded transactions. The API is on Render's free plan and
-goes to sleep when idle, so the first request can take up to about a minute.
+The file needs a header row with at least an `id` column; the usual columns
+are `id,timestamp,amount,currency,store_id,cashier_id,payment_method,discount,items`,
+with `items` as a JSON array in one quoted cell. See
+[docs/extractor.md](docs/extractor.md) for the full format. The file is read
+again on every run, so rows you append are loaded on the next run and rows
+already loaded are skipped as duplicates.
 
 ### Start all services
 
@@ -303,8 +298,11 @@ expression such as `*/15 * * * *` for a slower schedule.
 The POS page lives in a separate private repo, `salsa-pos-ui`. It runs a small
 server that keeps the API token in its own `.env` and forwards sales to
 salsa-pos-api. Publish it to your tailnet with `tailscale serve` and open it on
-your phone. See that repo's README for setup. The scheduler loads new sales on
-its next 30-second run.
+your phone. See that repo's README for setup.
+
+> **Note:** the ETL now reads only the CSV file at `CSV_PATH`, not
+> salsa-pos-api. Sales entered in the POS UI reach the pipeline only once they
+> are added to that CSV file.
 
 ### Seed the database
 
@@ -312,7 +310,7 @@ its next 30-second run.
 npm run db:init
 npm run db:seed              # load the 120 sales from salsa-pos-api\data\seed.json
 npm run db:seed -- --reset   # empty the tables first
-npm run db:seed -- --from-api  # take the rows from SHEETS_ENDPOINT instead
+npm run db:seed -- --from-csv  # take the rows from CSV_PATH instead
 ```
 
 The seed sends every row through the same code as a pipeline run (extractor
@@ -385,11 +383,12 @@ The first run requires the database initialization script and service entry poin
 
 SQLite is recommended for the local prototype because it does not require a separate database server process. If the project later moves to PostgreSQL or MySQL, the startup script will also need to start or verify the database server.
 
-## 8. Google Sheets connectivity
+## 8. Data source
 
-The microservices can run locally, but the extractor needs internet access to reach its source API. The default source is the shared salsa-pos-api at `https://salsa-pos-api.onrender.com/transactions` (code in `salsa-pos-api/`). A Google Apps Script Web App that returns the same JSON shape also works.
-
-The extractor should keep credentials and endpoint configuration in `.env` or another appropriate configuration mechanism. Do not commit secrets to the repository.
+The extractor reads transactions from the local CSV file at `CSV_PATH`
+(default `data/transactions.csv`), so the pipeline needs no internet access and
+no API token. Set `CSV_PATH` in `.env` to use a different file. Do not commit
+real customer data to the repository.
 
 ## 9. Recommended next step
 

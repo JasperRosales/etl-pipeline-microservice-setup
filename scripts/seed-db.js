@@ -2,7 +2,7 @@
 //
 //   npm run db:seed                 # load salsa-pos-api/data/seed.json
 //   npm run db:seed -- --reset      # empty transactions, etl_runs and notifications first
-//   npm run db:seed -- --from-api   # fetch rows from SHEETS_ENDPOINT instead of the file
+//   npm run db:seed -- --from-csv   # read rows from CSV_PATH (the extractor's file) instead
 //
 // Every row goes through the same code as a real pipeline run:
 //   extractor mapping (services/extractor/normalize.js)
@@ -22,35 +22,28 @@ const path = require("path");
 const Database = require("better-sqlite3");
 
 const config = require("../services/shared/config");
+const { readCsvRows } = require("../services/extractor/csv");
 const { toTransaction } = require("../services/extractor/normalize");
 const { transformBatch } = require("../services/transformer/validate");
 const { loadRequestProblem, loadBatch } = require("../services/loader/store");
 
 const SEED_FILE = path.join(__dirname, "..", "salsa-pos-api", "data", "seed.json");
 
-async function readRows(fromApi) {
-  if (!fromApi) return JSON.parse(fs.readFileSync(SEED_FILE, "utf8"));
-  const url = new URL(config.sheets.endpoint);
-  url.searchParams.set("token", config.sheets.apiToken);
-  const res = await fetch(url, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(70_000) });
-  if (!res.ok) throw new Error(`${config.sheets.endpoint} responded ${res.status}`);
-  const data = await res.json();
-  const rows = Array.isArray(data) ? data : data && data.transactions;
-  if (!Array.isArray(rows)) throw new Error("source response was neither an array nor { transactions: [...] }");
-  return rows;
+function readRows(fromCsv) {
+  return fromCsv ? readCsvRows(config.csvPath) : JSON.parse(fs.readFileSync(SEED_FILE, "utf8"));
 }
 
 async function main() {
   const args = new Set(process.argv.slice(2));
   for (const a of args) {
-    if (!["--reset", "--from-api"].includes(a)) throw new Error(`unknown option ${a} (use --reset and/or --from-api)`);
+    if (!["--reset", "--from-csv"].includes(a)) throw new Error(`unknown option ${a} (use --reset and/or --from-csv)`);
   }
 
   if (!fs.existsSync(config.dbPath)) {
     throw new Error(`database ${config.dbPath} does not exist - run "npm run db:init" first`);
   }
 
-  const rows = await readRows(args.has("--from-api"));
+  const rows = readRows(args.has("--from-csv"));
   const extracted = rows.map(toTransaction);
   const transformed = transformBatch(extracted);
   const runId = `seed-${crypto.randomUUID()}`;
@@ -69,7 +62,7 @@ async function main() {
 
     const total = db.prepare("SELECT COUNT(*) AS n FROM transactions").get().n;
     console.log(`Seeded ${config.dbPath}${args.has("--reset") ? " (reset first)" : ""}`);
-    console.log(`  source rows:  ${rows.length} (${args.has("--from-api") ? config.sheets.endpoint : path.relative(process.cwd(), SEED_FILE)})`);
+    console.log(`  source rows:  ${rows.length} (${args.has("--from-csv") ? path.relative(process.cwd(), config.csvPath) : path.relative(process.cwd(), SEED_FILE)})`);
     console.log(`  inserted:     ${loaded.inserted}`);
     console.log(`  duplicates:   ${loaded.skipped_duplicates}`);
     console.log(`  rejected:     ${transformed.rejected.length}`);

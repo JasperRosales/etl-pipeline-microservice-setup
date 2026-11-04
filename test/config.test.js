@@ -30,12 +30,17 @@ test("the ETL_CRON in .env.example is valid for node-cron", () => {
   assert.equal(cron.validate(line[1].trim()), true);
 });
 
-test("fails fast when SHEETS_ENDPOINT and API_TOKEN are missing, listing both", () => {
-  const r = runNode(LOAD, isolatedEnv({ SHEETS_ENDPOINT: "", API_TOKEN: "  " }));
+test("CSV_PATH defaults to data/transactions.csv under the project root", () => {
+  const code = `console.log(require("./services/shared/config").csvPath)`;
+  const r = runNode(code, isolatedEnv({ CSV_PATH: "" }));
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout.trim(), require("path").join(__dirname, "..", "data", "transactions.csv"));
+});
+
+test("fails fast listing every bad port at once", () => {
+  const r = runNode(LOAD, isolatedEnv({ PORT_EXTRACTOR: "80", PORT_LOADER: "x" }));
   assert.notEqual(r.status, 0);
   assert.match(r.stderr, /2 problem\(s\) found/);
-  assert.match(r.stderr, /SHEETS_ENDPOINT is required/);
-  assert.match(r.stderr, /API_TOKEN is required/);
 });
 
 for (const [value, label] of [["80", "privileged port"], ["70000", "too large"], ["30o1", "not a number"], ["3001.5", "not an integer"]]) {

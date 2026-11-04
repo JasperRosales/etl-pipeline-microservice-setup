@@ -71,23 +71,16 @@ test("loader validates run_id, transactions, and dedupe_hash; inserts idempotent
   assert.deepEqual(r.data, { inserted: 0, skipped_duplicates: 1 });
 });
 
-test("extractor rejects a bad since and maps source rows", async (t) => {
-  const http = require("http");
-  const rows = [{ id: "X-1", amount: "12.50", currency: "PHP", timestamp: "2026-10-01T00:00:00Z" }];
-  let lastQuery = null;
-  const source = http.createServer((req, res) => {
-    const u = new URL(req.url, "http://x");
-    lastQuery = u.searchParams;
-    if (u.searchParams.get("token") !== "test-token") {
-      res.writeHead(401).end("{}");
-      return;
-    }
-    res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ transactions: rows }));
-  });
-  await new Promise((r) => source.listen(0, "127.0.0.1", r));
-  t.after(() => new Promise((r) => source.close(r)));
+test("extractor rejects a bad since and maps CSV rows", async (t) => {
+  const fs = require("fs");
+  const dir = tempDir("etl-test-csv-");
+  const csvPath = path.join(dir, "transactions.csv");
+  fs.writeFileSync(
+    csvPath,
+    "id,timestamp,amount,currency\nX-0,2026-09-01T00:00:00Z,1.00,PHP\nX-1,2026-10-01T00:00:00Z,12.50,PHP\n"
+  );
 
-  const svc = await startService("extractor", { SHEETS_ENDPOINT: `http://127.0.0.1:${source.address().port}/transactions` });
+  const svc = await startService("extractor", { CSV_PATH: csvPath });
   t.after(svc.stop);
 
   let r = await request("POST", `${svc.base}/extract`, { since: "yesterday-ish" });
@@ -97,10 +90,28 @@ test("extractor rejects a bad since and maps source rows", async (t) => {
   r = await request("POST", `${svc.base}/extract`, { since: 12345 });
   assert.equal(r.status, 400);
 
+  r = await request("POST", `${svc.base}/extract`, {});
+  assert.equal(r.status, 200);
+  assert.equal(r.data.rows, 2);
+
   r = await request("POST", `${svc.base}/extract`, { since: "2026-09-30T00:00:00Z" });
   assert.equal(r.status, 200);
-  assert.equal(lastQuery.get("since"), "2026-09-30T00:00:00.000Z");
   assert.equal(r.data.rows, 1);
+  assert.equal(r.data.transactions[0].external_id, "X-1");
   assert.equal(r.data.transactions[0].amount_minor, 1250);
   assert.match(r.data.run_id, /^[0-9a-f-]{36}$/);
+
+  // Rows appended between runs are picked up on the next request.
+  fs.appendFileSync(csvPath, "X-2,2026-10-02T00:00:00Z,3.00,PHP\n");
+  r = await request("POST", `${svc.base}/extract`, {});
+  assert.equal(r.data.rows, 3);
+});
+
+test("extractor answers 500 when the CSV file is missing", async (t) => {
+  const svc = await startService("extractor");
+  t.after(svc.stop);
+  const r = await request("POST", `${svc.base}/extract`, {});
+  assert.equal(r.status, 500);
+  assert.equal(r.data.error.code, "internal_error");
+  assert.match(r.data.error.message, /CSV file not found/);
 });
