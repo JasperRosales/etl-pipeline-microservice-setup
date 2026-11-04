@@ -12,28 +12,11 @@
 
 "use strict";
 
-const crypto = require("crypto");
 const { start } = require("../shared/app");
+const { transformBatch } = require("./validate");
 
-function dedupeHash(tx) {
-  return crypto
-    .createHash("sha256")
-    .update([tx.source, tx.external_id, tx.amount_minor, tx.currency, tx.transaction_ts].join("|"))
-    .digest("hex");
-}
-
-function rejectionReason(tx) {
-  // A non-object entry has no external_id, so it fails the first check.
-  if (!tx || typeof tx !== "object" || typeof tx.external_id !== "string" || tx.external_id === "") {
-    return "missing_external_id";
-  }
-  if (!Number.isInteger(tx.amount_minor)) return "invalid_amount";
-  if (typeof tx.currency !== "string" || !/^[A-Z]{3}$/.test(tx.currency)) return "invalid_currency";
-  if (typeof tx.transaction_ts !== "string" || Number.isNaN(Date.parse(tx.transaction_ts))) {
-    return "invalid_timestamp";
-  }
-  return null;
-}
+// Matches the extractor's CSV row limit; a bigger batch is a client bug.
+const MAX_BATCH = 5_000;
 
 start("transformer", (app, ctx) => {
   const { sendError, log } = ctx;
@@ -43,37 +26,22 @@ start("transformer", (app, ctx) => {
     if (!Array.isArray(body.transactions)) {
       return sendError(res, 400, "invalid_request", "transactions must be an array");
     }
+    const unknown = Object.keys(body).filter((k) => k !== "transactions");
+    if (unknown.length) {
+      return sendError(res, 400, "invalid_request", `unknown field(s): ${unknown.join(", ")}`);
+    }
+    if (body.transactions.length > MAX_BATCH) {
+      return sendError(res, 400, "invalid_request", `transactions must have at most ${MAX_BATCH} entries`);
+    }
 
-    const rejected = [];
-    const transactions = [];
-    const seen = new Set();
-
-    body.transactions.forEach((tx, index) => {
-      const reason = rejectionReason(tx);
-      if (reason) {
-        rejected.push({ index, external_id: tx && typeof tx.external_id === "string" ? tx.external_id : null, reason });
-        return;
-      }
-      const hash = dedupeHash(tx);
-      if (seen.has(hash)) {
-        rejected.push({ index, external_id: tx.external_id, reason: "duplicate_in_batch" });
-        return;
-      }
-      seen.add(hash);
-      transactions.push({ ...tx, dedupe_hash: hash });
-    });
+    const result = transformBatch(body.transactions);
 
     log.info("transform", {
-      rows_in: body.transactions.length,
-      rows_out: transactions.length,
-      rejected: rejected.length,
+      rows_in: result.rows_in,
+      rows_out: result.rows_out,
+      rejected: result.rejected.length,
     });
 
-    res.json({
-      rows_in: body.transactions.length,
-      rows_out: transactions.length,
-      transactions,
-      rejected,
-    });
+    res.json(result);
   });
 });

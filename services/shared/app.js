@@ -43,6 +43,14 @@ function start(serviceName, routes) {
 
   app.disable("x-powered-by");
   app.use(express.json({ limit: "5mb" }));
+  // Every POST endpoint takes a JSON object; a top-level array, string or
+  // number is a client error, not an empty request.
+  app.use((req, res, next) => {
+    if (req.body !== undefined && (req.body === null || typeof req.body !== "object" || Array.isArray(req.body))) {
+      return sendError(res, 400, "invalid_request", "request body must be a JSON object");
+    }
+    next();
+  });
 
   const startedAt = Date.now();
   app.get("/health", (req, res) => {

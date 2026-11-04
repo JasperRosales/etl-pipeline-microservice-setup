@@ -37,16 +37,6 @@ function port(name, fallback) {
   return value;
 }
 
-// Must be present in .env (or the process environment).
-function required(name, hint) {
-  const raw = (process.env[name] || "").trim();
-  if (raw === "") {
-    problems.push(`${name} is required${hint ? ` (${hint})` : ""}.`);
-    return "";
-  }
-  return raw;
-}
-
 // Present value or fallback.
 function optional(name, fallback) {
   const raw = (process.env[name] || "").trim();
@@ -74,12 +64,8 @@ const config = {
   },
   dbPath: fromRoot(optional("DB_PATH", "./data/pos.db")),
   logDir: fromRoot(optional("LOG_DIR", "./logs")),
-  etlCron: optional("ETL_CRON", "*/15 * * * *"),
-  sheets: {
-    endpoint: required("SHEETS_ENDPOINT", "Apps Script Web App or Sheets API URL"),
-    appsScriptUrl: optional("APPS_SCRIPT_URL", ""),
-    apiToken: required("API_TOKEN", "token sent with each extractor request"),
-  },
+  etlCron: optional("ETL_CRON", "*/30 * * * * *"), // every 30 seconds (6-field, seconds first)
+  csvPath: fromRoot(optional("CSV_PATH", "./data/transactions.csv")), // extractor source file
 };
 
 if (problems.length > 0) {

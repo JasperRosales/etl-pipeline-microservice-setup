@@ -10,3 +10,7 @@ logs/*
 
 # Local SQLite database files
 data/*.db*
+
+# The extractor's source data is committed on purpose; keep it tracked even if
+# a broader data/ rule is added above.
+!data/transactions.csv
