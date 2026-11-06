@@ -84,7 +84,13 @@ start("reporter", (app, ctx) => {
         if (totals.n === 0) warnings.push("no transactions for this date");
         if (currencies.length > 1) warnings.push(`mixed currencies: ${currencies.map((c) => c.currency).join(", ")}; totals add them together`);
 
-        log.info("report", { date, tz: range.tz, transactions_count: totals.n });
+        log.info("report", {
+          date,
+          tz: range.tz,
+          transactions_count: totals.n,
+          sales_total_minor: totals.total,
+          warnings: warnings.length ? warnings : undefined,
+        });
 
         res.json({
           date,
@@ -118,6 +124,7 @@ start("reporter", (app, ctx) => {
     withDb(res, (db) => {
       try {
         const loaded = db.prepare(SQL.loadedTotal).get();
+        log.info("activity", { limit: raw, loaded_transactions: loaded.n, last_loaded_at: loaded.last_loaded_at });
         res.json({
           generated_at: new Date().toISOString(),
           loaded_transactions: loaded.n,

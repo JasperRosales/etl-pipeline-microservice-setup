@@ -108,16 +108,21 @@ start("scheduler", (app, ctx) => {
 
   async function runPipeline() {
     const startedAt = Date.now();
+    log.info("pipeline_start", {});
     try {
       const extracted = await post("extractor", "/extract", {});
       checkExtract(extracted);
-      const transformed = await post("transformer", "/transform", { transactions: extracted.transactions });
+      const runId = extracted.run_id;
+      log.info("stage_ok", { run_id: runId, stage: "extract", rows: extracted.rows, rejected: (extracted.rejected || []).length });
+      const transformed = await post("transformer", "/transform", { run_id: runId, transactions: extracted.transactions });
       checkTransform(transformed, extracted.transactions.length);
+      log.info("stage_ok", { run_id: runId, stage: "transform", rows_in: transformed.rows_in, rows_out: transformed.rows_out, rejected: transformed.rejected.length });
       const loaded = await post("loader", "/load", {
-        run_id: extracted.run_id,
+        run_id: runId,
         transactions: transformed.transactions,
       });
       checkLoad(loaded, transformed.transactions.length);
+      log.info("stage_ok", { run_id: runId, stage: "load", inserted: loaded.inserted, skipped_duplicates: loaded.skipped_duplicates });
 
       // CSV rows the extractor could not map count as rejected too.
       const allRejected = [...(extracted.rejected || []), ...transformed.rejected];

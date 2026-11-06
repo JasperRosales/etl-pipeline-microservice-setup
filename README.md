@@ -407,10 +407,26 @@ Get-Content .\logs\extractor.err.log -Tail 50
 Get-Content .\logs\extractor.jsonl -Tail 50
 ```
 
-Every service writes one JSON object per line:
+Every service writes each event twice:
 
-- `logs\<service>.jsonl` — structured events: startup, extract, transform, load, retries, errors, shutdown.
-- `logs\<service>.out.log` / `logs\<service>.err.log` — captured console output (the welcome banner plus the mirrored event lines).
+- `logs\<service>.jsonl`: one JSON object per line, for tools and scripts.
+- `logs\<service>.out.log` / `logs\<service>.err.log`: the same events as one
+  readable line each (also what `npm run start:<service>` prints), e.g.
+  `2026-11-04 05:52:08Z WARN  [transformer] transform_rejected run_id=b3f1 index=4 external_id=SALSA-TX-00005 reason=invalid_amount`.
+
+To check that a service actually did its job, follow these events:
+
+| Service | Events |
+|---|---|
+| every service | `request` for each call (method, path, status, duration; plus `error`/`message` on a 4xx/5xx). `GET /health` is not logged. |
+| extractor | `extract` (rows, rejected, first/last id); `extract_rejected` per CSV row it could not map |
+| transformer | `transform` (rows_in, rows_out, rejected, counts by reason); `transform_rejected` per rejected row (index, external_id, reason) |
+| loader | `load_inserted` per newly stored row; `load` (rows, inserted, skipped_duplicates, first 5 skipped ids) |
+| notifier | `notify` (notification_id, channel, delivered, subject, body) |
+| reporter | `report` (date, count, total, warnings); `activity` |
+| scheduler | `pipeline_start`, `stage_ok` after extract / transform / load, then `pipeline_ok` or `pipeline_failed` |
+
+Lines from one run share its `run_id`, so `Select-String b3f1 .\logs\*.out.log` shows that run across every service.
 
 The first run requires the database initialization script and service entry points to exist. The startup script skips any service whose `index.js` file is missing.
 

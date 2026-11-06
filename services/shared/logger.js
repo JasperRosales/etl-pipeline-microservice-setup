@@ -1,8 +1,11 @@
 // Structured JSON-lines logging for every service (Issue 7, Day 7).
 //
 // Each service gets one file per run stream: logs/<service>.jsonl with one
-// JSON object per line, mirrored to the console so the .out.log / .err.log
-// capture from start-etl.ps1 stays useful for a quick look.
+// JSON object per line. Every event is also printed to the console as one
+// readable line, which is what the .out.log / .err.log capture from
+// start-etl.ps1 (and npm run start:<service>) shows:
+//
+//   2026-11-04 05:52:08Z INFO  [transformer] transform run_id=b3f1 rows_in=23 rows_out=2 rejected=21
 //
 //   const log = createLogger("loader", config.logDir);
 //   log.info("load", { run_id, inserted, skipped_duplicates });
@@ -15,6 +18,20 @@
 const fs = require("fs");
 const path = require("path");
 
+function formatValue(v) {
+  if (typeof v === "string") return /^[^\s"=]+$/.test(v) ? v : JSON.stringify(v);
+  return JSON.stringify(v);
+}
+
+function consoleLine(level, event, fields, serviceName) {
+  const ts = new Date().toISOString().replace("T", " ").slice(0, 19) + "Z";
+  const kv = Object.entries(fields)
+    .filter(([, v]) => v !== undefined)
+    .map(([k, v]) => `${k}=${formatValue(v)}`)
+    .join(" ");
+  return `${ts} ${level.toUpperCase().padEnd(5)} [${serviceName}] ${event}${kv ? " " + kv : ""}`;
+}
+
 function createLogger(serviceName, logDir) {
   fs.mkdirSync(logDir, { recursive: true });
   const file = path.join(logDir, `${serviceName}.jsonl`);
@@ -26,8 +43,9 @@ function createLogger(serviceName, logDir) {
     } catch {
       // Never fail a request because the log file could not be written.
     }
-    if (level === "error") console.error(line);
-    else console.log(line);
+    const text = consoleLine(level, event, fields, serviceName);
+    if (level === "error") console.error(text);
+    else console.log(text);
   }
 
   return {

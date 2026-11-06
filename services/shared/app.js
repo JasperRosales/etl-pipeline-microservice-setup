@@ -22,6 +22,7 @@ const pkg = require(path.join(__dirname, "..", "..", "package.json"));
 
 function sendError(res, status, code, message) {
   if (res.headersSent) return;
+  res.locals.error = { code, message }; // picked up by the request log line
   res.status(status).json({ error: { code, message } });
 }
 
@@ -42,6 +43,29 @@ function start(serviceName, routes) {
   const app = express();
 
   app.disable("x-powered-by");
+
+  // One log line per request once the response is sent, so every call -
+  // including a rejected (4xx) or failed (5xx) one - leaves a trace. GET
+  // /health is skipped: start-etl.ps1 and the scheduler poll it constantly.
+  app.use((req, res, next) => {
+    if (req.method === "GET" && req.path === "/health") return next();
+    const t0 = process.hrtime.bigint();
+    res.on("finish", () => {
+      const fields = {
+        method: req.method,
+        path: req.originalUrl,
+        status: res.statusCode,
+        duration_ms: Math.round(Number(process.hrtime.bigint() - t0) / 1e6),
+      };
+      if (res.locals.error) {
+        fields.error = res.locals.error.code;
+        fields.message = res.locals.error.message;
+      }
+      const level = res.statusCode >= 500 ? "error" : res.statusCode >= 400 ? "warn" : "info";
+      log[level]("request", fields);
+    });
+    next();
+  });
   app.use(express.json({ limit: "5mb" }));
   // Every POST endpoint takes a JSON object; a top-level array, string or
   // number is a client error, not an empty request.

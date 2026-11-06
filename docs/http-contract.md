@@ -136,9 +136,9 @@ through the pipeline into `POST /load`. `rows` always equals
 
 | | |
 |---|---|
-| Request | `{ "transactions": [ …raw transactions… ] }` |
+| Request | `{ "run_id": "b3f1...", "transactions": [ …raw transactions… ] }` — `run_id` optional (same format as for `/load`); only used to tag the transformer's log lines with the run |
 | Response 200 | `{ "rows_in": 2, "rows_out": 1, "transactions": [ …transformed… ], "rejected": [ …rejected records… ] }` |
-| Response 400 | `invalid_request` — `transactions` missing, not an array, or over 5,000 entries; or any other top-level field |
+| Response 400 | `invalid_request` — `transactions` missing, not an array, or over 5,000 entries; `run_id` present but not 1–100 letters, digits, `-` or `_`; or any other top-level field |
 | Response 500 | `internal_error` |
 | Failure modes | Empty array → 200 with all counts 0; a record that fails validation goes to `rejected` with a reason, it is not an error |
 
@@ -248,7 +248,7 @@ together and lists them by reason, e.g. `rejected 2 [amount_mismatch: 1, wrong_f
 ```text
 POST http://127.0.0.1:3001/extract      { "since": "2026-10-12T00:00:00Z" }
                                        → { "run_id": "b3f1", "rows": 2, "transactions": [t1, t2] }
-POST http://127.0.0.1:3002/transform    { "transactions": [t1, t2] }
+POST http://127.0.0.1:3002/transform    { "run_id": "b3f1", "transactions": [t1, t2] }
                                        → { "rows_in": 2, "rows_out": 2, "transactions": [t1', t2'], "rejected": [] }
 POST http://127.0.0.1:3003/load         { "run_id": "b3f1", "transactions": [t1', t2'] }
                                        → { "inserted": 2, "skipped_duplicates": 0 }

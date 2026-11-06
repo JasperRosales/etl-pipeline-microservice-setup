@@ -68,7 +68,8 @@ function loadRequestProblem(body, now = Date.now()) {
 }
 
 // Writes one validated batch inside a single SQLite transaction and upserts
-// the etl_runs row. -> { inserted, skipped_duplicates }
+// the etl_runs row. -> { inserted, skipped_duplicates, inserted_ids, skipped_ids }
+// (the two id lists are for logging; POST /load returns only the counts)
 function loadBatch(db, runId, transactions, now = new Date()) {
   const insert = db.prepare(INSERT_TX);
   const rows = transactions.map((tx) => ({
@@ -81,18 +82,24 @@ function loadBatch(db, runId, transactions, now = new Date()) {
     dedupe_hash: tx.dedupe_hash,
   }));
 
-  let inserted = 0;
-  let skipped = 0;
+  const insertedIds = [];
+  const skippedIds = [];
   db.transaction(() => {
     for (const row of rows) {
-      if (insert.run(row).changes > 0) inserted++;
-      else skipped++;
+      if (insert.run(row).changes > 0) insertedIds.push(row.external_id);
+      else skippedIds.push(row.external_id);
     }
+    const inserted = insertedIds.length;
     const ts = now.toISOString();
     db.prepare(UPSERT_RUN).run({ run_id: runId, started_at: ts, finished_at: ts, rows_in: rows.length, rows_out: inserted });
   })();
 
-  return { inserted, skipped_duplicates: skipped };
+  return {
+    inserted: insertedIds.length,
+    skipped_duplicates: skippedIds.length,
+    inserted_ids: insertedIds,
+    skipped_ids: skippedIds,
+  };
 }
 
 module.exports = { loadRequestProblem, loadBatch };

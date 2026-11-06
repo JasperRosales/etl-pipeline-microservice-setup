@@ -41,8 +41,18 @@ start("extractor", (app, ctx) => {
     try {
       const { rows, rejected } = readCsvRows(config.csvPath);
       const transactions = filterSince(rows, since).map(toTransaction);
-      if (rejected.length) log.warn("extract_rejected", { run_id: runId, rejected });
-      log.info("extract", { run_id: runId, rows: transactions.length, rejected: rejected.length, file: config.csvPath });
+      for (const r of rejected) {
+        log.warn("extract_rejected", { run_id: runId, row: r.row, external_id: r.external_id, reason: r.reason, detail: r.detail });
+      }
+      log.info("extract", {
+        run_id: runId,
+        rows: transactions.length,
+        rejected: rejected.length,
+        since,
+        first_id: transactions.length ? transactions[0].external_id : undefined,
+        last_id: transactions.length ? transactions[transactions.length - 1].external_id : undefined,
+        file: config.csvPath,
+      });
       res.json({ run_id: runId, rows: transactions.length, transactions, rejected });
     } catch (err) {
       log.error("extract_failed", { run_id: runId, message: err.message });

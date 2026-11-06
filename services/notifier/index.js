@@ -64,7 +64,13 @@ start("notifier", (app, ctx) => {
         .run(body.channel, body.subject, body.body, new Date().toISOString());
 
       const delivered = body.channel === "log";
-      log.info("notify", { channel: body.channel, subject: body.subject, delivered });
+      log.info("notify", {
+        notification_id: Number(info.lastInsertRowid),
+        channel: body.channel,
+        delivered,
+        subject: body.subject,
+        body: body.body,
+      });
 
       res.json({ delivered, channel: body.channel, notification_id: info.lastInsertRowid });
     } catch (err) {

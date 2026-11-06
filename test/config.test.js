@@ -61,6 +61,6 @@ test("scheduler refuses to start with an invalid ETL_CRON", () => {
   const r = runNode(`require("./services/scheduler/index.js")`, isolatedEnv({ ETL_CRON: "every 30 seconds", SCHEDULER_PORT: "3399", LOG_DIR: require("os").tmpdir() }));
   assert.equal(r.status, 1);
   // Our own check, not node-cron's exception, must be what stops it.
-  assert.match(r.stderr, /"event":"invalid_cron"/);
+  assert.match(r.stderr, /ERROR \[scheduler\] invalid_cron /);
   assert.match(r.stderr, /every 30 seconds/);
 });

@@ -208,6 +208,7 @@ async function main() {
     extracted = await step(2, "Extractor: read the CSV", "POST", "extractor", "/extract", SINCE ? { since: SINCE } : {});
   }
   const transformed = await step(3, "Transformer: validate, clean, dedupe", "POST", "transformer", "/transform", {
+    run_id: extracted.run_id,
     transactions: extracted.transactions,
   });
   let mismatches = 0;

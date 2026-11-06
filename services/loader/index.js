@@ -30,8 +30,17 @@ start("loader", (app, ctx) => {
 
     try {
       const result = loadBatch(db, body.run_id, body.transactions);
-      log.info("load", { run_id: body.run_id, inserted: result.inserted, skipped_duplicates: result.skipped_duplicates });
-      res.json(result);
+      // One line per newly stored row (only new data, so reruns stay quiet),
+      // then the batch summary with the duplicates that were already stored.
+      for (const id of result.inserted_ids) log.info("load_inserted", { run_id: body.run_id, external_id: id });
+      log.info("load", {
+        run_id: body.run_id,
+        rows: body.transactions.length,
+        inserted: result.inserted,
+        skipped_duplicates: result.skipped_duplicates,
+        skipped_sample: result.skipped_ids.length ? result.skipped_ids.slice(0, 5) : undefined,
+      });
+      res.json({ inserted: result.inserted, skipped_duplicates: result.skipped_duplicates });
     } catch (err) {
       log.error("load_failed", { run_id: body.run_id, message: err.message });
       sendError(res, 500, "internal_error", `database write failed: ${err.message}`);
