@@ -243,6 +243,14 @@ Before using each response it checks the contract, and fails the run (with a
 The run summary counts the extractor's and transformer's rejected rows
 together and lists them by reason, e.g. `rejected 2 [amount_mismatch: 1, wrong_field_count: 1]`.
 
+**Bad dataset gate.** After `/transform`, the scheduler checks the share of bad
+rows: the extractor's `rejected` plus the transformer's `rejected`, divided by
+every row the extractor read. If it is `MAX_REJECT_RATIO` (default `0.6`) or more,
+the whole batch is neglected. `/load` is not called, so nothing is written. The
+scheduler logs `batch_rejected` and notifies `ETL run neglected: bad dataset`
+with the counts and reasons. `npm run pipeline` applies the same rule and exits 1.
+An empty batch is never neglected.
+
 ## 6. Happy-path example (scheduler's view)
 
 ```text

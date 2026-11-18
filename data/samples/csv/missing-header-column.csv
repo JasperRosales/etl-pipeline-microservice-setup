@@ -1,0 +1,6 @@
+id,timestamp,amount,store_id,cashier_id,payment_method,discount,items
+SMP-HDR-0000,2026-10-01T01:00:00.000Z,149.00,PHP,STORE-LIPA,C-101,cash,0.00,"[{""sku"":""SAL-001"",""name"":""Classic Salsa Roja 250g"",""qty"":1,""unit_price"":""149.00""}]"
+SMP-HDR-0001,2026-10-02T02:07:00.000Z,318.00,PHP,STORE-NASUGBU,C-102,gcash,0.00,"[{""sku"":""SAL-002"",""name"":""Salsa Verde 250g"",""qty"":2,""unit_price"":""159.00""}]"
+SMP-HDR-0002,2026-10-03T03:14:00.000Z,267.00,PHP,STORE-BATANGAS,C-103,maya,0.00,"[{""sku"":""CHP-001"",""name"":""Tortilla Chips 200g"",""qty"":3,""unit_price"":""89.00""}]"
+SMP-HDR-0003,2026-10-04T04:21:00.000Z,65.00,PHP,STORE-LIPA,C-104,card,0.00,"[{""sku"":""BEV-002"",""name"":""Calamansi Soda 330ml"",""qty"":1,""unit_price"":""65.00""}]"
+SMP-HDR-0004,2026-10-05T05:28:00.000Z,298.00,PHP,STORE-NASUGBU,C-105,cash,0.00,"[{""sku"":""SAL-001"",""name"":""Classic Salsa Roja 250g"",""qty"":2,""unit_price"":""149.00""}]"

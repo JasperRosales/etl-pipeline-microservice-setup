@@ -37,6 +37,18 @@ function port(name, fallback) {
   return value;
 }
 
+// Number in (0, 1], or the fallback.
+function ratio(name, fallback) {
+  const raw = (process.env[name] || "").trim();
+  if (raw === "") return fallback;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0 || value > 1) {
+    problems.push(`${name} must be a number greater than 0 and at most 1 (got "${raw}").`);
+    return fallback;
+  }
+  return value;
+}
+
 // Present value or fallback.
 function optional(name, fallback) {
   const raw = (process.env[name] || "").trim();
@@ -65,6 +77,8 @@ const config = {
   dbPath: fromRoot(optional("DB_PATH", "./data/pos.db")),
   logDir: fromRoot(optional("LOG_DIR", "./logs")),
   etlCron: optional("ETL_CRON", "*/30 * * * * *"), // every 30 seconds (6-field, seconds first)
+  // Neglect a whole batch when this share of its rows is bad (0.6 = 60%).
+  maxRejectRatio: ratio("MAX_REJECT_RATIO", 0.6),
   csvPath: fromRoot(optional("CSV_PATH", "./data/transactions.csv")), // extractor source file
 };
 
