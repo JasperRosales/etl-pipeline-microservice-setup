@@ -17,6 +17,7 @@
 const cron = require("node-cron");
 const { start } = require("../shared/app");
 const { withRetry } = require("../shared/retry");
+const { assessBatch } = require("../shared/quality");
 
 start("scheduler", (app, ctx) => {
   const { config, log } = ctx;
@@ -113,6 +114,26 @@ start("scheduler", (app, ctx) => {
       checkExtract(extracted);
       const transformed = await post("transformer", "/transform", { transactions: extracted.transactions });
       checkTransform(transformed, extracted.transactions.length);
+
+      // Bad dataset gate: too many bad rows means the source is broken, so
+      // load nothing rather than a misleading fraction of it.
+      const quality = assessBatch(extracted, transformed, config.maxRejectRatio);
+      if (!quality.ok) {
+        const reasonText = Object.entries(quality.reasons).map(([k, v]) => `${k}: ${v}`).join(", ");
+        log.warn("batch_rejected", {
+          run_id: extracted.run_id,
+          total: quality.total,
+          bad: quality.bad,
+          percent: quality.percent,
+          max_percent: Math.round(config.maxRejectRatio * 100),
+          reasons: quality.reasons,
+        });
+        await notify(
+          "ETL run neglected: bad dataset",
+          `run ${extracted.run_id}: ${quality.bad}/${quality.total} rows bad (${quality.percent}%, limit ${Math.round(config.maxRejectRatio * 100)}%), nothing loaded [${reasonText}]`
+        );
+        return;
+      }
       const loaded = await post("loader", "/load", {
         run_id: extracted.run_id,
         transactions: transformed.transactions,

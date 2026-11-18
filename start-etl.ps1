@@ -92,6 +92,7 @@ foreach ($Service in $Services) {
         -WorkingDirectory $ServiceDir `
         -RedirectStandardOutput $Stdout `
         -RedirectStandardError $Stderr `
+        -WindowStyle Hidden `
         -PassThru
 
     $Started += [PSCustomObject]@{

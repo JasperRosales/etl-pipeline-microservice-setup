@@ -8,6 +8,7 @@
 //   npm run pipeline -- --date 2026-10-01 --tz +08:00
 //   npm run pipeline -- --input data/samples/bad-transactions.json
 //   npm run pipeline -- --input <file.json> --no-load   transform only
+//   npm run pipeline -- --csv data/samples/csv/edge-60pct-bad.csv
 //
 // --input skips the extractor and sends the transactions in a JSON file
 // straight to the transformer, to test wrong data. The file is either an
@@ -16,6 +17,11 @@
 // a valid row). With cases, the run ends with an expected-vs-actual table and
 // exits 1 on any mismatch. --no-load stops after the transformer, so nothing
 // is written to the database.
+//
+// --csv reads another CSV file with the extractor's own parser
+// (services/extractor/csv.js + normalize.js) instead of calling the
+// extractor, so the test CSVs in data/samples/csv/ can be run without
+// changing CSV_PATH. Rows the parser cannot map count as rejected.
 //
 // Steps (docs/http-contract.md section 5):
 //   1. GET  /health          every service
@@ -37,6 +43,7 @@ const crypto = require("crypto");
 const fs = require("fs");
 const http = require("http");
 const path = require("path");
+const { assessBatch } = require("../services/shared/quality");
 
 let config;
 try {
@@ -55,6 +62,7 @@ const SINCE = arg("--since");
 const DATE = arg("--date");
 const TZ = arg("--tz");
 const INPUT = arg("--input");
+const CSV = arg("--csv");
 const NO_LOAD = process.argv.includes("--no-load");
 const PREVIEW_ROWS = 2;
 
@@ -192,7 +200,7 @@ async function main() {
     }
   }
   const required = NO_LOAD ? ["transformer"] : ["transformer", "loader", "notifier", "reporter"];
-  if (!INPUT) required.unshift("extractor");
+  if (!INPUT && !CSV) required.unshift("extractor");
   const missing = required.filter((s) => down.includes(s));
   if (missing.length) throw new Error(`not running: ${missing.join(", ")}. Start the stack with .\\start-etl.ps1`);
 
@@ -204,6 +212,14 @@ async function main() {
     header(2, `Extractor: skipped, using --input ${INPUT}`);
     console.log(`  ${input.transactions.length} transactions read from the file`);
     extracted = { run_id: `sample-${crypto.randomUUID()}`, rows: input.transactions.length, transactions: input.transactions, rejected: [] };
+  } else if (CSV) {
+    const { readCsvRows } = require("../services/extractor/csv");
+    const { toTransaction } = require("../services/extractor/normalize");
+    header(2, `Extractor: skipped, parsing --csv ${CSV} locally`);
+    const { rows, rejected } = readCsvRows(path.resolve(process.cwd(), CSV)); // throws on a bad header
+    const transactions = rows.map(toTransaction);
+    console.log(`  ${transactions.length} rows mapped, ${rejected.length} rejected by the CSV parser`);
+    extracted = { run_id: `csv-${crypto.randomUUID()}`, rows: transactions.length, transactions, rejected };
   } else {
     extracted = await step(2, "Extractor: read the CSV", "POST", "extractor", "/extract", SINCE ? { since: SINCE } : {});
   }
@@ -218,6 +234,25 @@ async function main() {
       process.exitCode = 1;
     }
   };
+  // Bad dataset gate, same rule as the scheduler (MAX_REJECT_RATIO).
+  const quality = assessBatch(extracted, transformed, config.maxRejectRatio);
+  const limit = Math.round(config.maxRejectRatio * 100);
+  header("3c", `Quality gate: neglect the batch at ${limit}% bad rows or more`);
+  console.log(`  ${quality.bad}/${quality.total} rows bad (${quality.percent}%) -> ${quality.ok ? "PASS, loading" : "NEGLECTED, nothing loaded"}`);
+  if (!quality.ok) {
+    const reasonText = Object.entries(quality.reasons).map(([k, v]) => `${k}: ${v}`).join(", ");
+    const summary = `run ${extracted.run_id}: ${quality.bad}/${quality.total} rows bad (${quality.percent}%, limit ${limit}%), nothing loaded [${reasonText}]`;
+    if (!NO_LOAD) {
+      await step(5, "Notifier: record the neglected run", "POST", "notifier", "/notify", {
+        channel: "log",
+        subject: INPUT || CSV ? "ETL sample run neglected: bad dataset (manual)" : "ETL run neglected: bad dataset (manual)",
+        body: summary,
+      });
+    }
+    console.log(`\n${"=".repeat(70)}\n NEGLECTED  ${summary}\n${"=".repeat(70)}`);
+    process.exitCode = 1;
+    return fail();
+  }
   if (NO_LOAD) {
     console.log(`\n--no-load: stopped after the transformer, nothing written to the database.`);
     return fail();
@@ -236,7 +271,7 @@ async function main() {
 
   await step(5, "Notifier: record the outcome", "POST", "notifier", "/notify", {
     channel: "log",
-    subject: INPUT ? "ETL sample run completed (manual)" : "ETL run completed (manual)",
+    subject: INPUT || CSV ? "ETL sample run completed (manual)" : "ETL run completed (manual)",
     body: summary,
   });
 

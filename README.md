@@ -55,6 +55,14 @@ The system is organized around six services: extractor, transformer, loader, rep
 6. Each service writes output to its own log files.
 7. Use `.\stop-etl.ps1` to stop the recorded service processes.
 
+### Terminal UI (any OS)
+
+`npm run tui` opens a terminal dashboard: start/stop/restart services (one or all), live health, per-service logs, and one-key pipeline, bad-data, health, test and DB runs. It uses the same PID file and stop markers as the PowerShell scripts, so either can stop the other's services. `q` quits and leaves the services running. `Q` stops them, then quits.
+
+### Test CSVs for the bad dataset gate
+
+`data/samples/csv/` holds CSVs with known shares of bad rows: clean, 20%, 59% (still loads), 60% (neglected, the default limit), 80%, all bad, broken columns, duplicates, header only, and a missing header column. Run one with `npm run pipeline -- --csv data/samples/csv/edge-60pct-bad.csv`, or press `v` in the TUI to step through them. `npm run samples` regenerates them, and `test/sample-csvs.test.js` checks each file's verdict.
+
 ### Services
 
 | Service | Local port | Responsibility |
